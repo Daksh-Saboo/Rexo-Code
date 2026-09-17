@@ -1,1380 +1,1022 @@
-# Rexo Code
+<div align="center">
 
-[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
-[![Release](../../actions/workflows/release.yml/badge.svg)](../../actions/workflows/release.yml)
+# ⚡ Rexo Code
 
-An open-source, provider-agnostic AI coding agent for the terminal — inspired by
-tools like Claude Code, built as an independent implementation.
+### An open-source, provider-agnostic AI coding agent for your terminal.
 
+**Bring your own model. Own your workflow. Run AI directly in your terminal.**
+
+[![Version](https://img.shields.io/badge/version-0.7.3-brightgreen?style=flat-square)](../../releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white&style=flat-square)](https://www.rust-lang.org/)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](#downloads)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/KvBVgQYZh)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white&style=flat-square)](https://ko-fi.com/dakshislegend)
+[![Patreon](https://img.shields.io/badge/Patreon-Support-F96854?logo=patreon&logoColor=white&style=flat-square)](https://www.patreon.com/cw/FronoBear)
+
+<br>
+
+Rexo Code reads and searches your project, proposes and applies edits,<br>
+runs commands, uses tools, and iterates toward the task you give it —<br>
+while keeping a permission and security layer between the model and your machine.
+
+<br>
+
+**Windows • macOS • Linux**
+
+</div>
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+| Workspace Trust | Main CLI |
+|---|---|
+| <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164004.jpg?raw=true" width="100%"> | <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164037.jpg?raw=true" width="100%"> |
+
+| Sending a Prompt | Agent Output |
+|---|---|
+| <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164058.jpg?raw=true" width="100%"> | <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164114.jpg?raw=true" width="100%"> |
+
+| Command Suggestions | Help Browser |
+|---|---|
+| <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164134.jpg?raw=true" width="100%"> | <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-14%20164153.jpg?raw=true" width="100%"> |
+
+</div>
+
+---
+
+## 🚀 What is Rexo Code?
+
+**Rexo Code** is an open-source AI coding agent built in **Rust** for developers who want an AI coding workflow directly inside their terminal.
+
+Instead of locking you to one AI provider, Rexo is designed around a **provider-agnostic architecture**.
+
+You can connect:
+
+- OpenAI-compatible APIs
+- NVIDIA NIM
+- Google Gemini
+- OpenRouter
+- Groq
+- Together
+- Fireworks
+- Mistral
+- DeepSeek
+- Cerebras
+- xAI
+- Local model servers
+- Custom OpenAI-compatible endpoints
+
+Rexo can then use the selected model to:
+
+- 🔎 Explore your project
+- 📖 Read files
+- 🔍 Search source code
+- ✏️ Edit files
+- 📄 Create files
+- 🗑️ Delete files
+- 💻 Run terminal commands
+- 🌿 Work with Git
+- 🧠 Maintain project context
+- 🧩 Load skills
+- ⚡ Execute custom commands
+- 🔄 Iterate through multi-step tasks
+
+All of this happens inside a persistent terminal UI.
+
+---
+
+## ✨ Features
+
+### 🤖 Provider-Agnostic AI
+
+Rexo does not lock you into one model provider.
+
+Use cloud APIs, hosted inference, or local models through a unified provider system.
+
+| Provider type | Support |
+|---|---|
+| NVIDIA NIM | ✅ |
+| OpenAI-compatible APIs | ✅ |
+| Google Gemini | ✅ Native driver |
+| Local model servers | ✅ |
+| Custom endpoints | ✅ |
+| OpenRouter | ✅ |
+| Groq | ✅ |
+| Together | ✅ |
+| Fireworks | ✅ |
+| Mistral | ✅ |
+| DeepSeek | ✅ |
+| Cerebras | ✅ |
+| xAI | ✅ |
+
+Local servers such as **Ollama, vLLM, LM Studio, and llama.cpp servers** can be used through the local/OpenAI-compatible interfaces.
+
+### 🖥️ Full Terminal UI
+
+Rexo uses a persistent full-screen terminal interface instead of repeatedly printing separate prompts.
+
+The interface includes:
+
+- Live session header
+- Provider and model information
+- Workspace information
+- Permission status
+- Streaming responses
+- Scrollable transcript
+- Interactive input
+- Command history
+- Tab completion
+- Permission dialogs
+- Full-screen help browser
+- Provider/model pickers
+- Animated startup intro
+
+The UI is built around `ratatui` and `crossterm`.
+
+### 🔌 Live Provider & Model Switching
+
+You don't need to restart Rexo to change your configuration.
+
+```text
+/model
+/models
+/provider
+/connect
 ```
- _____  ________   ______     _____ ____  _____  ______
-|  __ \|  ____\ \ / / __ \   / ____/ __ \|  __ \|  ____|
-| |__) | |__   \ V / |  | | | |   | |  | | |  | | |__
-|  _  /|  __|   > <| |  | | | |   | |  | | |  | |  __|
-| | \ \| |____ / . \ |__| | | |___| |__| | |__| | |____
-|_|  \_\______/_/ \_\____/   \_____\____/|_____/|______|
+
+Provider and model pickers support:
+
+- Arrow-key navigation
+- Type-to-filter search
+- Live model discovery
+- Manual model entry
+- Masked API-key entry
+- Session-level configuration
+- Persistent configuration
+
+### 🧠 Agent Loop
+
+Rexo follows a model → tool → result → model loop.
+
+```text
+                  ┌──────────────────────┐
+                  │      User Task       │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │        Model         │
+                  └──────────┬───────────┘
+                             │
+                       Final answer?
+                        ↙         ↘
+                      YES          NO
+                       │            │
+                  ┌─────────┐  ┌─────────────┐
+                  │ Answer  │  │  Tool Call  │
+                  └─────────┘  └──────┬──────┘
+                                      │
+                                      ▼
+                             ┌──────────────────┐
+                             │ Permission Check │
+                             └────────┬─────────┘
+                                      │
+                                      ▼
+                             ┌──────────────────┐
+                             │   Execute Tool   │
+                             └────────┬─────────┘
+                                      │
+                                      ▼
+                                  Tool Result
+                                      │
+                                      └───────────────► Model
 ```
 
-REXO reads and searches your project, proposes and applies edits, runs
-commands, and iterates — with a permission system in the loop for anything
-that isn't read-only.
+The loop is bounded by configurable iteration and tool-call limits so a model cannot continue indefinitely.
 
-## Status
+### 🛠️ Built-in Tools
 
-This is v0.7.3: a working agent loop with real tool-calling and streaming
-(including native Gemini SSE streaming), support for many
-OpenAI-compatible providers plus local models, a persistent full-screen
-terminal UI with an animated startup intro, arrow-key pickers for
-`/connect`/`/model`/first-launch setup/`/resume`/`/rewind`, session
-persistence (`/resume`, `/branch`, `/fork`), a shell-mode passthrough
-(`!`), a skills system, custom commands, a permission/security layer
-gating every tool call, a provider capability model and normalized error
-classification, and CI/packaged downloads for all five target platforms
-instead of source-only delivery. It has not been run against a large
-real-world codebase yet — treat it as an early, working foundation
-rather than a finished product. See [Roadmap](#roadmap) for what's next,
-and [Known limitations](#known-limitations) for an honest list of what's
-config/UI-only vs. actually wired up (MCP tool execution, in particular,
-isn't yet — `/mcp` configures a server entry, it doesn't speak the
-protocol yet).
+| Tool | Purpose | Default permission |
+|---|---|---|
+| `read_file` | Read a UTF-8 text file | Automatic |
+| `list_files` | List a directory | Automatic |
+| `search_files` | Recursive literal-substring search | Automatic |
+| `edit_file` | Exact find/replace | Ask |
+| `create_file` | Create a new file | Ask |
+| `delete_file` | Delete a file | Ask |
+| `run_command` | Execute shell commands | Classified |
+| `git` | Git operations | Classified |
 
-**Renamed from TRON-Code to Rexo Code in v0.7.1** — a naming clash with
-an existing, unrelated project. Everything user-facing changed to match:
-the `rexo` binary, `rexo.toml`, the `.rexo/` config directory,
-`REXO_*` env vars. No functional behavior changed because of the rename
-itself — see [What's new in v0.7.1](#whats-new-in-v071) for exactly
-what moved.
+Rexo's `edit_file` tool does not blindly overwrite files.
 
-## Downloads
+The model must provide:
 
-REXO builds natively — not cross-compiled — for five targets. [CI](.github/workflows/ci.yml)
-builds and, everywhere a runner for that OS exists, tests all five on
-every push; [Release](.github/workflows/release.yml) publishes them to
-this repo's [Releases page](../../releases) whenever a `vX.Y.Z` tag is
-pushed.
+- `old_string`
+- `new_string`
 
-| Platform             | Target triple              | Archive |
-|-----------------------|-----------------------------|---------|
-| Linux x64             | `x86_64-unknown-linux-gnu`  | `rexo-code-linux-x86_64.tar.gz` |
-| macOS Intel            | `x86_64-apple-darwin`       | `rexo-code-macos-x86_64.tar.gz` |
-| macOS Apple Silicon    | `aarch64-apple-darwin`      | `rexo-code-macos-aarch64.tar.gz` |
-| Windows x64            | `x86_64-pc-windows-msvc`    | `rexo-code-windows-x86_64.zip` |
-| Windows ARM64          | `aarch64-pc-windows-msvc`   | `rexo-code-windows-aarch64.zip` |
+Rexo verifies that the expected text exists and is unique before applying the change. If the expected content isn't found, the edit is rejected. This helps prevent accidental edits against stale or unexpected file contents.
 
-Each archive is self-contained: the `rexo` binary, `README.md`,
-`LICENSE`, and the matching install script (`install.sh`/`uninstall.sh`
-for Linux/macOS, `install.ps1`/`install.bat`/`uninstall.ps1` plus
-`rexo.ico` for Windows). A `SHA256SUMS.txt` covering every archive ships
-alongside them on the release.
+### 🔒 Security & Permissions
 
-**No Rust toolchain needed** for a downloaded release — that's the whole
-point of shipping prebuilt binaries rather than source-only, which is
-what every prior version did. If you'd rather build from source (or
-you're on a platform not listed above), see [Quickstart](#quickstart)
-below; `install.sh`/`install.ps1` both still build locally by default.
+Rexo is designed around the idea that AI should not automatically receive unlimited control over your machine.
 
-A couple of honest caveats, stated plainly rather than glossed over:
+#### Workspace boundaries
 
-- **The `linux-x86_64` leg is the only one actually built and run in
-  this project's own development environment**, which is Linux-only —
-  every release/`cargo test` verification described in this README for
-  that target is real, on the real compiled binary. The other four legs
-  (macOS Intel/Apple Silicon, Windows x64/ARM64) are defined correctly in
-  `release.yml`/`ci.yml` and follow the same native-runner-per-OS
-  approach every major Rust CLI tool uses, but **have not yet been
-  observed actually running on GitHub's infrastructure** — no tag has
-  been pushed to trigger them yet. Pushing the first `vX.Y.Z` tag to a
-  real GitHub repo is what turns that "should work" into "does work";
-  until then, treat those four as correctly-specified but unverified.
-- **Windows ARM64 is cross-linked, not run.** MSVC's linker can target
-  ARM64 from an x64 host without an ARM64 machine, so the binary will be
-  real once CI runs — but GitHub doesn't currently offer a hosted
-  Windows-on-ARM runner, so CI can't execute the test suite (or this
-  binary) on real ARM64 Windows before it ships. Flagged in `ci.yml`'s
-  comments too.
-- **macOS binaries will be unsigned/unnotarized.** Gatekeeper will refuse
-  to open them with a plain double-click; either
-  `xattr -d com.apple.quarantine rexo` after downloading, or right-click
-  → Open once to approve it. Code-signing needs a paid Apple Developer
-  account, which isn't set up for this project — a real limitation, not
-  an oversight.
+Filesystem operations are resolved against the active workspace.
 
-### What's new in v0.7.3
+Attempts such as:
 
-- **Fixed a real startup bug**: launching `rexo` with no provider
-  configured used to hard-exit before the TUI ever opened — no way to
-  reach `/connect` to fix it, exactly the failure mode a real Windows
-  user hit and reported. Root cause: startup called `config.api_key()`
-  and `Agent::bootstrap()` unconditionally and exited hard on either
-  failing, even for interactive sessions. The codebase already had a
-  graceful-degradation pattern for this exact situation —
-  `Session::rebuild_provider` swaps in an `UnconfiguredProvider` stand-in
-  when a *runtime* `/connect`/`/model` change fails, rather than leaving
-  the old provider silently in place — it just wasn't being used at
-  startup. Now it is: an interactive `rexo` always reaches the TUI, with
-  a clear "No provider is configured yet — run /connect" note. Headless/
-  single-shot mode (a prompt given on the command line) still fails
-  fast, since there's no session to recover into there, but the message
-  now also says to run `rexo` with no prompt to set up interactively.
-  Verified with a PTY test that reproduces the exact reported scenario —
-  no key, no model, `setup_completed` already true — and confirms the
-  process stays alive, shows the warning, and `/status` still works.
-- **A bug in fixing the bug, caught before it shipped**: wiring the fix
-  above briefly broke the build with a rustc cycle error, traced back to
-  an editing slip in v0.7.2 that had deleted the `Provider` trait's own
-  `#[async_trait]` attribute while removing an accidental duplicate type.
-  Restored; full test suite re-verified green before this was called
-  done.
-- **Rebrand cleanup pass**: internal test scratch-directory names and a
-  few stale test function names still said `tron` — cosmetic, never
-  visible to users, but worth being thorough about since v0.7.2 already
-  found one real miss (the letter-spaced intro title). An exhaustive
-  rescan this time — including letter-spaced patterns and the compiled
-  icon's binary strings, not just plain-text search — turned up nothing
-  further.
+```text
+../../etc/passwd
+```
 
-### What's new in v0.7.2
+or absolute paths outside the workspace are rejected.
 
-- **Fixed real leftover branding**: the startup intro's title was still
-  a letter-spaced `"T R O N - C O D E"` string. The v0.7.1 rebrand's
-  search-and-replace was word-boundary-based and looked for a contiguous
-  `TRON` substring — which doesn't exist in text with a space between
-  every letter, so it walked right past this one. An exhaustive grep
-  across the tree came up clean at the time because grep doesn't know
-  the letters were meant to spell a word either; the intro animation
-  itself just never got the same scrutiny as everything else, since it's
-  cosmetic and there was no existing test checking its on-screen text.
-  Now reads `"R E X O   C O D E"`, confirmed by a PTY test that
-  specifically asserts no `"T R O N"` shows up anywhere across the whole
-  animation, not just that the fix looks right in the source.
-- **Slower, more deliberate intro**: three scan-lines now sweep across
-  the screen at once before the face assembles — one along the top
-  (left→right), one along the bottom (right→left), and a faster one
-  straight through where the face's eyes are about to land (cleared away
-  right as the face itself gets there, so it reads as "the scan finds
-  where the face appears" rather than leftover clutter). The whole thing
-  now runs about 4 seconds end to end, up from well under 1 — genuinely
-  slower, not just padded with a longer final hold. Any keypress at any
-  point still skips straight to the fully-assembled final frame.
+#### Command risk classification
 
-### What's new in v0.7.1
+Terminal commands are classified before execution:
 
-- **Renamed to Rexo Code.** Binary (`tron` → `rexo`), crate/package
-  (`tron-code` → `rexo-code`), config file (`tron.toml` → `rexo.toml`),
-  config directory (`.tron/` → `.rexo/`), every `TRON_*` env var
-  (`REXO_MODEL`, `REXO_GLOBAL_DIR`, `REXO_NO_INTRO`, ...), the icon, the
-  Windows Terminal profile, install/uninstall scripts, CI/release
-  workflows — everywhere. Verified with a clean rebuild, the full test
-  suite, a real PTY session showing "Rexo Code" in the running TUI, and
-  `install.sh`/`uninstall.sh` run end-to-end against the renamed binary;
-  a final exhaustive grep across the whole tree turned up zero remaining
-  references to the old name.
-- **Session persistence wired up for real.** A backend module
-  (`cli::sessions` — save/load/list/delete, autosave after every turn,
-  path-traversal-safe name sanitizing, its own unit tests) already
-  existed in the tree from an earlier pass, but was never declared as
-  part of the build — `grep` for its own module declaration turned up
-  nothing, meaning it wasn't even being compiled. Declaring it and wiring
-  it up is most of what made the rest of this section possible.
-- **`/resume`** — bare, opens a picker over every saved session
-  (autosave + named) and loads the one you pick, replacing the current
-  conversation. `/resume list`/`save <name>`/`delete <name>`/`<name>`
-  work without the picker too, for scripting.
-- **`/branch <name>`** — bookmarks the current conversation as a new
-  named session without switching away from it; `/resume <name>` later
-  to explore that path. **`/fork <name>`** does the same save, but also
-  switches *this* session to continue as the fork going forward (future
-  autosaves redirect to `<name>.json`), leaving the pre-fork autosave
-  alone as something you can still `/resume` back to. Honestly scoped:
-  neither one runs anything concurrently — Rexo has no
-  subagent/background-execution runtime, so "fork" here means a real
-  saved divergence point, not autonomous parallel work.
-- **`/rewind`** — bare, in the TUI, opens a picker over every earlier
-  point in *this* conversation (each message you sent is a checkpoint)
-  and truncates history back to it; `/rewind <n>` does the same without
-  the picker. Conversation-only, stated plainly in the command's own
-  output: it does not revert file edits, since that needs workspace
-  snapshots (git-based or otherwise) this project doesn't have yet.
-- **Two real bugs found by testing all of the above against the actual
-  binary**, not just reviewing the code:
-  - Real PTY testing of `/branch`/`/resume`/`/rewind` — nothing further
-    to report here; it worked as designed the first time these got a
-    proper end-to-end pass.
-  - A pre-existing formatting drift in the provider catalog (`base_url:`
-    lines missing their indentation on about a dozen presets, unrelated
-    to the rename) got noticed and fixed while in that file for the
-    rebrand sweep.
+- **Automatic**
+- **Ask**
+- **Blocked**
 
-### What's new in v0.7
+Dangerous operations can be blocked outright rather than simply asking for confirmation. Command chains are also analyzed so dangerous commands cannot simply hide behind an otherwise safe command.
 
-- **Startup intro animation** — typing `rexo` now shows the boxed face
-  (the same `┏┓┃┗┛`/`◉◉` visual language as the header mascot, just
-  bigger) scatter in from random positions and converge into place, then
-  hold for a beat with "REXO-CODE" underneath before clearing into the
-  session. Any keypress skips straight through; `--no-intro` or
-  `REXO_NO_INTRO=1` skip it entirely (for scripts, or anyone who'd rather
-  not see it every time). Verified with a real PTY test against the
-  compiled binary, both with and without the flag.
-- **First-launch wizard rewritten on real pickers** — provider selection
-  is now arrow-key + type-to-filter, and the API key prompt is genuine
-  masked raw-mode input, replacing the "type a number from a printed
-  list" + plain-text `read_line` flow that had been deferred since
-  v0.4.0. It opens its own short-lived terminal session before the main
-  TUI exists (the `cli::picker` module's own docs described exactly this
-  plan from the start — it just hadn't been wired up until now).
-- **Two real bugs found by actually testing the above, not just writing
-  it**, both fixed:
-  - Leaving the wizard's alt-screen and immediately entering the trust
-    dialog's could show stale wizard content bleeding through cells the
-    trust dialog never explicitly draws into — alternate-screen buffers
-    aren't guaranteed blank on re-entry. Fixed with an explicit
-    `terminal.clear()` right after every `EnterAlternateScreen` in the
-    wizard, trust dialog, and main TUI.
-  - The wizard's model prompt said "blank = pick later with /model", but
-    `rexo` can't actually reach the interactive session (where `/model`
-    would run) without a model already resolved — leaving it blank
-    produced a config that failed on the *next* launch with "No model
-    configured". Fixed by defaulting to a sensible per-provider model
-    (and requiring one for providers with no safe universal default)
-    instead of promising a deferred fix that didn't work.
+#### Permission prompts
 
-### What's new in v0.6
+When Rexo needs approval:
 
-- **Shell mode** — type a bare `!` to drop into a mode where every line
-  runs directly in PowerShell/`sh` instead of going to the model;
-  `!<command>` runs one command immediately regardless of mode. See
-  [Shell mode](#shell-mode). Bypasses the agent's permission engine
-  entirely and deliberately so — you're the one typing it, not the
-  model.
-- **Provider capability model, for real this time** — `ModelCapabilities`
-  grew from 4 fields to 11 (`parallel_tools`/`structured_output`/
-  `model_discovery`/`context_window`/`max_output`/`cancellation`/
-  `usage_reporting`, on top of the original `tool_calling`/`streaming`/
-  `vision`/`reasoning`), and — the actual gap being closed here — it's
-  now displayed in `/status`. It existed since v0.4 but nothing ever
-  read it; confirmed via a grep across the codebase before touching it.
-- **Normalized provider errors** — a closed `ProviderErrorKind` enum
-  classifies every provider failure (`rate_limited`, `authentication`,
-  `context_exceeded`, `timeout`, `network`, `server`, ...) on top of the
-  existing human-readable message. Surfaced in the TUI (retryable
-  failures get tagged) and in `rexo --output json`'s new `error_kind`
-  field for scripts. See [Providers](#providers).
-- **Real Gemini streaming** — `streamGenerateContent?alt=sse`, parsed
-  incrementally, replaces the old "call the plain endpoint once, report
-  the whole answer at the end" fallback from v0.4.1. Its own SSE loop
-  (Gemini's chunk shape differs from the OpenAI-style one every other
-  provider shares), tested against hand-built multi-chunk streams —
-  still genuinely untested against the live API, same sandbox-network
-  limitation as before.
-- **The wizard migration credential-rename bug is fixed** — flagged in
-  v0.4.1, left open through v0.5.0. Root cause: migrating a working setup
-  to a global profile renamed its credential lookup key to `"migrated"`
-  instead of preserving whichever key was already resolving successfully,
-  silently orphaning env vars/credential-store entries saved under the
-  old name. 3 regression tests reproduce the original failure and confirm
-  the fix.
+- `y` → Allow once
+- `a` → Allow for this session
+- `n` → Deny
 
-### What's new in v0.5
+Denied or blocked operations are returned to the model as tool results, allowing the agent to adapt instead of crashing.
 
-- **Real CI**: every push builds (and, on every OS with a native GitHub
-  runner, tests) all five target platforms — see
-  [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Before this,
-  "it compiles" only ever meant "it compiles on this project's Linux
-  sandbox."
-- **Packaged releases**: pushing a `vX.Y.Z` tag builds and publishes
-  prebuilt binaries for all five platforms to GitHub Releases — see
-  [`.github/workflows/release.yml`](.github/workflows/release.yml) and
-  [Downloads](#downloads) above. This closes out the "Packaged releases"
-  roadmap item that's been open since v0.1.
-- **`install.sh`/`uninstall.sh`** — the Linux/macOS counterpart to
-  `install.ps1`/`uninstall.ps1`, same philosophy: build (or reuse a
-  downloaded binary), copy it to a per-user bin directory, add exactly
-  one PATH line to whichever shell rc file matches `$SHELL`, touch
-  nothing else. Tested end-to-end (install → run → uninstall → PATH
-  line cleanly removed) against the real script, not just written and
-  assumed correct.
-- **A real `LICENSE` file** (MIT) — the README claimed one "before
-  publishing" since v0.1; it's now actually there, and bundled into
-  every release archive.
+> **Important:** Rexo is not a complete sandbox. It runs with the permissions of your operating-system user. Its security layer is designed as a set of controls and hard stops, not as protection against a fully compromised operating system.
 
-### What's new in v0.4
+### 🌊 Real Streaming
 
-- **`/connect`, `/model`, `/models`, `/provider` are real arrow-key,
-  type-to-filter pickers now**, drawn directly in the persistent screen —
-  including a live-discovered, browsable/filterable model list and a
-  masked API-key box that never leaves the TUI (see
-  [Console UX](#console-ux)). Selecting a model applies it immediately.
-- **A skills system** (`.rexo/skills/<name>/SKILL.md`, project + global,
-  keyword-triggered or forced with `/skill <name>` — see
-  [Skills](#skills)) and **custom commands**
-  (`.rexo/commands/<name>.md` → `/<name>`, with `$ARGUMENTS`/`$1..$9`
-  substitution — see [Custom commands](#custom-commands)).
-- **Real `/copy`** (OS clipboard) and **real `/add-dir`** (read-only extra
-  roots — see [Known limitations](#known-limitations) for exactly how
-  that's scoped down from the full roadmap item).
-- **The header mascot has actual expressions** now — thinking, reasoning,
-  writing, a permission-wait face, and note-reactive idle states — driven
-  off real session state, not a canned animation loop.
-- **Ctrl+Y "selection mode"** releases the terminal's own mouse capture so
-  its native click-drag select-and-copy works normally; **Alt+M**/**Alt+P**
-  jump straight to the model/provider pickers; a bare **`?`** as the very
-  first character opens the shortcut list.
-- The console title now reads "Rexo Code — \<folder\>" instead of your
-  shell's own title; a Windows `.exe` icon and a Windows Terminal
-  tab-icon profile fragment are included under `assets/` (the icon
-  embedding is real `build.rs`/`winres` code, gated to `cfg(windows)` —
-  genuinely untested on this project's own Linux build sandbox, worth
-  trying on a real Windows checkout).
+Rexo supports real streaming responses instead of waiting for the entire response before displaying anything.
 
-See `/release-notes` inside REXO for the full list, including v0.3's.
+**OpenAI-compatible providers** use SSE streaming where supported.
 
-## Quickstart
+**Google Gemini** has a native driver because Gemini's API format differs from the OpenAI-compatible protocol. Gemini streaming uses:
 
-Already have a [downloaded release](#downloads)? Skip straight to running
-`rexo` (or `.\install.ps1 -SkipBuild` / `./install.sh --skip-build` to put
-it on PATH) — everything below is the from-source path.
+```text
+streamGenerateContent?alt=sse
+```
 
-**Windows (PowerShell):**
+and is parsed incrementally.
+
+### 🧩 Skills
+
+Rexo supports reusable project and global skills.
+
+Create:
+
+```text
+.rexo/
+└── skills/
+    └── commit-style/
+        └── SKILL.md
+```
+
+Example:
+
+```markdown
+---
+name: commit-style
+description: Project commit message conventions
+triggers: commit, changelog
+---
+
+Use imperative mood.
+Keep the subject under 72 characters.
+Reference an issue number when one exists.
+```
+
+Skills can be:
+
+- Automatically triggered
+- Manually loaded
+- Project-specific
+- Global
+
+Commands:
+
+```text
+/skills
+/skill <name>
+```
+
+### ⚡ Custom Commands
+
+Create reusable slash commands inside `.rexo/commands/`.
+
+Example:
+
+```markdown
+---
+description: Review the current code
+---
+
+Review the requested code for:
+- Bugs
+- Security issues
+- Performance problems
+- Maintainability
+
+Focus area:
+$1
+
+Additional context:
+$ARGUMENTS
+```
+
+Then run:
+
+```text
+/review security
+```
+
+Rexo supports `$ARGUMENTS`, `$1`, `$2`, `$3`, ..., `$9`.
+
+### 🐚 Shell Mode
+
+Type a bare `!` and press Enter to enter shell mode.
+
+```text
+> !
+Shell mode on.
+
+> git status
+On branch main
+nothing to commit, working tree clean
+
+> !
+Shell mode off.
+```
+
+You can also run a single command directly:
+
+```text
+!git status
+```
+
+Shell mode intentionally bypasses the AI permission engine because the command is explicitly entered by the user rather than requested by the model.
+
+### 📎 @File References
+
+Rexo supports direct file references inside prompts.
+
+```text
+@src/main.rs
+@src/
+```
+
+You can combine multiple references:
+
+```text
+Review @src/auth.rs and @Cargo.toml
+```
+
+Rexo resolves referenced files before sending the request to the model. The picker respects `.gitignore`, skips binary files, supports directories, provides searchable suggestions, and limits how much content is injected into context.
+
+### 🌍 Global Configuration
+
+Rexo separates workspace configuration from global configuration.
+
+Resolution order:
+
+```text
+CLI flags
+   ↓
+Session overrides
+   ↓
+Environment variables
+   ↓
+Workspace rexo.toml
+   ↓
+Global configuration
+   ↓
+Built-in defaults
+```
+
+This means your provider and model configuration does not have to disappear when you switch projects.
+
+- **Windows:** `%LOCALAPPDATA%\RexoCode`
+- **Linux:** `~/.local/share/rexo-code`
+- **macOS:** `~/Library/Application Support/rexo-code`
+
+Credentials are stored separately from workspace files.
+
+### 🔑 Credentials
+
+Rexo supports:
+
+- Environment variables
+- Session-only API keys
+- Persistent provider credentials
+- Named provider profiles
+
+API keys are not intentionally displayed by `/status`, `/config`, or `/doctor`.
+
+Persistent credentials are currently file-based rather than stored in Windows Credential Manager, macOS Keychain, or another OS-native encrypted vault.
+
+---
+
+## 📥 Downloads
+
+Rexo provides prebuilt binaries so users don't need Rust installed just to run the application.
+
+### Supported Platforms
+
+| Platform | Target | Archive |
+|---|---|---|
+| 🪟 Windows x64 | `x86_64-pc-windows-msvc` | `rexo-code-windows-x86_64.zip` |
+| 🪟 Windows ARM64 | `aarch64-pc-windows-msvc` | `rexo-code-windows-aarch64.zip` |
+| 🍎 macOS Intel | `x86_64-apple-darwin` | `rexo-code-macos-x86_64.tar.gz` |
+| 🍎 macOS Apple Silicon | `aarch64-apple-darwin` | `rexo-code-macos-aarch64.tar.gz` |
+| 🐧 Linux x64 | `x86_64-unknown-linux-gnu` | `rexo-code-linux-x86_64.tar.gz` |
+
+➡️ **[Download the latest release](../../releases)**
+
+Each release archive contains the Rexo binary and the appropriate installation files. A `SHA256SUMS.txt` checksum file is also published alongside releases.
+
+### Release verification status
+
+Rexo builds natively for the five target platforms.
+
+The Linux x64 target is the only one verified in the project's own development environment. The other targets are defined for native GitHub runners but should be treated as unverified until a release has actually run through those CI paths.
+
+Windows ARM64 is cross-linked rather than executed on a hosted Windows ARM64 runner.
+
+macOS builds are currently unsigned and unnotarized. Gatekeeper may require you to approve the binary manually.
+
+---
+
+## 📦 Installation
+
+### Windows
+
+Download and extract the Windows archive.
+
+Run:
 
 ```powershell
+.\install.ps1
+```
+
+Or:
+
+```cmd
+.\install.bat
+```
+
+For an already-built release binary:
+
+```powershell
+.\install.ps1 -SkipBuild
+```
+
+Open a new terminal window and run:
+
+```powershell
+rexo
+```
+
+### Linux / macOS
+
+Extract the release archive and run:
+
+```bash
+./install.sh
+```
+
+For an existing downloaded binary:
+
+```bash
+./install.sh --skip-build
+```
+
+Open a new terminal and run:
+
+```bash
+rexo
+```
+
+### Build from source
+
+If you want to develop Rexo or build it yourself, install the Rust toolchain first.
+
+```bash
 git clone <your-fork-url> rexo-code
 cd rexo-code
+```
+
+Create your environment file:
+
+**Windows:**
+
+```powershell
 copy .env.example .env
 ```
 
 **Linux / macOS:**
 
 ```bash
-git clone <your-fork-url> rexo-code
-cd rexo-code
 cp .env.example .env
 ```
 
-Edit `.env` and set your key:
+Configure your provider credentials, for example:
 
 ```env
 NVIDIA_API_KEY=nvapi-...
 ```
 
-Get a free NVIDIA NIM API key at <https://build.nvidia.com>. `rexo.toml`
-already points at NVIDIA's `moonshotai/kimi-k3` — change `[model].model` if
-you'd rather use a different NIM model.
+Then build:
 
 ```bash
-cargo build
-cargo run -- "list the top-level files in this project"
+cargo build --release
 ```
 
-Or run the compiled binary directly:
+Run the compiled binary:
+
+**Windows:**
 
 ```powershell
-# Windows
-cargo run --release
-target\release\rexo.exe "find where authentication is implemented"
+target\release\rexo.exe
 ```
+
+**Linux / macOS:**
 
 ```bash
-# Linux / macOS
-cargo run --release
-target/release/rexo "find where authentication is implemented"
+./target/release/rexo
 ```
 
-### Running `rexo` from anywhere (not just this folder)
+---
 
-`cargo build`/`cargo run` only ever produce a binary inside this checkout
-— cargo never puts that on your PATH for you, which is why `rexo` on its
-own fails with "command not found" (or "'rexo' is not recognized...")
-from any other directory. A few ways to fix that:
+## ⚡ Quick Start
 
-```powershell
-# Windows — Option A: the usual Rust way, installs into
-# %USERPROFILE%\.cargo\bin, which rustup already added to PATH.
-cargo install --path .
-
-# Windows — Option B: builds a release binary and copies it to
-# %LOCALAPPDATA%\RexoCode\bin, adding that to your PATH.
-.\install.ps1
-# (or double-click / run install.bat if you're in cmd.exe)
-```
+After installation:
 
 ```bash
-# Linux / macOS — Option A: the usual Rust way, installs into
-# ~/.cargo/bin, which rustup already added to PATH.
-cargo install --path .
-
-# Linux / macOS — Option B: builds a release binary and copies it to
-# ~/.local/bin (or $REXO_INSTALL_DIR if you set one), adding that to PATH.
-./install.sh
+rexo
 ```
 
-Either way, open a **new** terminal window afterwards — PATH changes never
-reach a terminal that's already running. `.\uninstall.ps1` / `./uninstall.sh`
-reverses what the matching install script did.
+You can then enter tasks such as:
 
-With no prompt argument, REXO starts an interactive session: a full-screen
-terminal UI opens (see [Console UX](#console-ux) below for what that looks
-like). Type `/exit`, bare `exit`/`quit`, or press Ctrl+C twice to leave.
-
-> **Security note on API keys:** never put a real key in `rexo.toml`,
-> source files, commit messages, or anywhere it might get committed or
-> pasted somewhere public — `.env` is git-ignored specifically so this
-> doesn't happen. If a key is ever exposed (committed, pasted in a chat,
-> logged, etc.), treat it as compromised and rotate it immediately.
-
-## Console UX
-
-The first time you start an interactive session, REXO asks whether it
-should trust the workspace — a real, keyboard-navigable dialog (arrow keys
-or j/k to move, Enter to confirm, Esc to cancel), rendered with
-[`ratatui`](https://ratatui.rs)/`crossterm`:
-
-```
-┌ Rexo Code ─────────────────────────────────────────────┐
-│ Accessing workspace:                                    │
-│ I:\Projects\MyApp                                        │
-│                                                           │
-│ Quick safety check: is this a project you created or     │
-│ one you trust (your own code, a well-known open-source   │
-│ project, or work from your team)? If not, review what's  │
-│ in this folder before continuing.                        │
-│                                                           │
-│ REXO will be able to read, edit, and execute files here.  │
-│                                                           │
-│ > No, exit                                                │
-│   Yes, I trust this folder                                │
-│                                                           │
-│ ↑/↓ to choose · Enter to confirm · Esc to cancel           │
-└───────────────────────────────────────────────────────────┘
+```text
+Find where authentication is implemented.
 ```
 
-Declining exits without touching the workspace. This only runs for
-interactive sessions (not `--yes`, `--non-interactive`, or single-shot
-`rexo "task"` runs), and degrades gracefully — not an error — if the
-terminal can't support it (piped output, some restricted consoles).
-
-After that, the whole session is one persistent, full-screen `ratatui`
-application — a live header, a scrollable transcript, and a single bordered
-input box that *is* the input (earlier versions had a second, separate
-`rexo>` prompt underneath a plain-printed banner that didn't actually take
-input where it visually looked like it should; that's gone):
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ ┏━━┓  Rexo Code v0.2.0                                                   │
-│ ┃◉◉┃  nvidia (moonshotai/kimi-k3)                                        │
-│ ┗━━┛  I:\Projects\MyApp                                                  │
-│       Edits: ask  Terminal: ask  Git writes: ask                        │
-└──────────────────────────────────────────────────────────────────────────┘
- Welcome to Rexo Code v0.2.0. Type a task, or /help for commands.
-
- > list the files in this project
- ✻ Thinking…                          (dimmed chain-of-thought, if the model streams one)
- Let me check the project structure first...
-
- ⏺ Read(src/main.rs)
-   ⎿ Read 214 lines
-
- ⏺ Edit(src/main.rs)
-   ⎿ Edited src/main.rs (-3 / +5 lines).
-
- Here's what I changed and why...      (the final answer)
-
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Try "list the files in this project"                                     │
-└──────────────────────────────────────────────────────────────────────────┘
-  ⏸ manual mode · /help for shortcuts · Ctrl+C to cancel
+```text
+Find all API endpoints and explain how authentication works.
 ```
 
-The header updates live the moment `/model`, `/provider`, `/permissions`,
-`/rename`, or `/color` change anything — no restart, no stale display.
-
-The input box has real line editing: Up/Down for command history, and
-**Tab-completion** — type `/mo` and a floating popup lists `/model` and
-`/models`; Up/Down narrows the selection, Tab or Enter accepts it.
-`/workspace <path>` and `/cd <path>` tab-complete real, on-disk directories
-the same way.
-
-`/help` opens as a full-screen overlay (General / Commands / Custom
-commands tabs, ←/→ to switch, ↑/↓ to scroll) rather than a wall of text —
-run it any time for the complete, current command list; a few entries are
-marked `(planned)` where they're registered for discoverability but don't
-do anything yet (see [Roadmap](#roadmap)).
-
-Permission prompts (`y` once / `a` always this session / `n` deny) are a
-proper modal in this same screen — not a second blocking `stdin` read
-racing the render loop. A handful of commands that need old-fashioned
-blocking terminal input of their own (`/connect`'s guided setup,
-`/provider add`, `/api set`'s hidden password prompt, `/workspace`/`/cd`
-when the target doesn't exist yet and REXO asks whether to create it) step
-out of this screen for the length of that one prompt and back in
-afterwards, rather than reimplementing every one of those flows against
-raw-mode key events — see the doc comment on `cli::tui::run_suspended` if
-you're curious exactly why.
-
-Some models (Kimi K3 in particular) **always reason** before answering,
-streamed separately from the final answer as `reasoning_content`. REXO shows
-that "thinking" text dimmed as it arrives, with an animated spinner + elapsed
-timer before the first token, so the screen never looks frozen — see
-[Speeding it up](#speeding-it-up) below for making that reasoning step
-faster.
-
-Press Ctrl+C at any point during a turn to cancel it cleanly — you get a
-`Cancelled.` note and a clean return to the input box. At an idle, empty
-input box, Ctrl+C once shows a reminder; press it again within two seconds
-(or type `/exit`) to actually leave. With text typed in the box, Ctrl+C
-just clears the line, the usual shell convention.
-
-## How it works
-
-```
-rexo "your task"
-      │
-      ▼
- conversation + tool schemas ──► model
-      │                            │
-      │       final answer ◄───────┤
-      │                            │
-      │                     tool call(s)
-      │                            │
-      │                     permission check
-      │                    (automatic / ask / denied)
-      │                            │
-      │                        execute tool
-      │                            │
-      │                     tool result appended
-      │                            │
-      └────────────────── loop until final answer ─┘
+```text
+Add error handling to the login flow and update the tests.
 ```
 
-Bounded by `[agent].max_iterations` and `[agent].max_tool_calls` in
-`rexo.toml`, so a misbehaving model can't loop forever.
+Rexo will inspect the project, use its available tools, request permission where required, and return the result.
 
-### Tools
+---
 
-| Tool | What it does | Default permission |
-|---|---|---|
-| `read_file` | Read a UTF-8 text file (line-numbered) | automatic |
-| `list_files` | List a directory, optionally recursive | automatic |
-| `search_files` | Recursive literal-substring search | automatic |
-| `edit_file` | Exact find/replace on a file's content | ask |
-| `create_file` | Create a new file | ask |
-| `delete_file` | Delete a file | ask (high risk) |
-| `run_command` | Run a shell command | classified: safe (`cargo check`, `git status`, ...) / ask / **blocked** if it matches the dangerous-command policy |
-| `git` | Run a git subcommand | read subcommands (status/diff/log/branch/show/remote) automatic; write subcommands (commit/push/checkout/...) ask |
+## 🖥️ Headless Mode
 
-`edit_file` is deliberately not "overwrite the whole file": the model must
-supply the exact text it expects to find (`old_string`) and what to replace
-it with (`new_string`). The edit is rejected — no change made — if that text
-isn't found, or isn't unique, in the file. This both forces the model to
-work from the file's real current content and gives a free, cheap conflict
-check.
+Rexo can also operate without the interactive TUI.
 
-### Security
-
-- **Workspace boundary**: every filesystem tool resolves paths against the
-  workspace root and refuses anything that would escape it (`../../etc/...`,
-  absolute paths outside the workspace, etc).
-- **Command risk classification**: shell commands are matched against a
-  safe-prefix allow-list and a dangerous-pattern deny-list. Dangerous
-  commands (`rm -rf /`, `Remove-Item -Recurse -Force`, disk/format
-  operations, `sudo`, execution-policy changes, ...) are blocked outright —
-  no permission prompt can override this. Chained commands
-  (`git status && rm -rf /`) are decomposed and re-checked so a dangerous
-  command can't hide behind a safe-looking prefix.
-- **Permission engine**: anything that isn't automatic asks for approval —
-  `y` (once), `a` (always for the rest of this session), or anything else
-  (deny). `--yes` auto-approves everything (use with care); `--non-interactive`
-  (or simply not having a terminal attached, e.g. in CI) denies anything not
-  pre-approved in `rexo.toml` instead of hanging on a prompt.
-- A denied or blocked call is reported back to the model as a normal tool
-  result — the agent adapts instead of crashing.
-
-None of this is a full sandbox (REXO runs with your OS-user's permissions,
-same as any CLI tool you `cargo run`). It's a deliberate, layered set of
-speed bumps and hard stops, not a security boundary against a truly
-adversarial model.
-
-### Configuration, providers, and credentials
-
-Three layers, most specific wins — this is the fix for the exact bug of
-"REXO forgets its provider when I `cd` somewhere else": earlier versions'
-*only* place for provider/model settings was a `rexo.toml` next to
-wherever you ran `rexo` from, and the *only* place for credentials was a
-`.env` in that same directory — neither followed you anywhere else.
-
-```
-CLI flags (--provider/--model/--base-url)        most specific
-    ↓
-session-only changes (/provider, /model, ... when you pick
-"this session only" rather than "permanently")
-    ↓
-REXO_PROVIDER / REXO_MODEL / REXO_BASE_URL environment variables
-    ↓
-workspace rexo.toml's [model] section, if present
-    ↓
-global config.toml's default provider profile
-    ↓
-built-in defaults                                least specific
+```bash
+rexo "find where authentication is implemented"
 ```
 
-**Global config** lives in an OS-appropriate per-user directory —
-`%LOCALAPPDATA%\RexoCode` on Windows (the same directory `install.ps1`
-already puts `rexo.exe` in), `~/.local/share/rexo-code` on Linux,
-`~/Library/Application Support/rexo-code` on macOS — never inside a
-workspace, so it loads identically no matter which directory `rexo` runs
-from. `/connect`'s "Permanently" choice and the first-launch wizard write
-to it; `/doctor` shows exactly where it is on your machine.
+For machine-readable output:
 
-**Credentials** are stored separately, in `credentials.toml` next to
-`config.toml` — file-based, not a true OS-encrypted vault (not Windows
-Credential Manager / macOS Keychain / a Secret Service item — see
-[Known limitations](#known-limitations)), but structurally outside any
-git-tracked project directory (impossible to `git add` by accident, unlike
-a workspace `.env`), permission-hardened to owner-only on Unix, and
-resolved the same way regardless of workspace. Key resolution for a given
-provider profile: session override → `REXO_<CREDENTIAL_KEY>_API_KEY` env
-var → the credential store. `/api set --permanent` and `/connect`'s
-"Permanently" choice write to it; nothing ever prints a key, logs one, or
-sends one anywhere but the provider itself.
-
-### First run
-
-The first time you run `rexo` with no saved global config, a short setup
-wizard runs instead of dropping straight into a session: search for a
-provider, enter a key, pick a model, choose permanent-vs-session. It never
-runs again after that (whether you configured something or explicitly
-skipped it) — `/connect` covers the same ground any time later. Piped/CI
-runs (`--non-interactive`, `--yes`, or no real terminal attached) skip it
-silently and just proceed.
-
-If you already had a working v0.2-style setup (workspace `rexo.toml` +
-`.env`) the first time you run the new version, the wizard detects that
-and offers a one-question "save this globally too?" instead of the full
-flow — your existing settings aren't touched either way.
-
-### Providers
-
-Most providers speak the same OpenAI-compatible `/chat/completions`
-protocol (request building + SSE streaming parsing lives once, in
-`src/providers/protocol.rs`) and just differ in endpoint/model — `/connect`
-searches a built-in catalog of about 18 of these
-(`src/providers/catalog.rs`: OpenRouter, Groq, Together, Fireworks,
-Mistral, DeepSeek, Cerebras, DeepInfra, xAI, OpenAI, NVIDIA NIM, plus a few
-more listed for discoverability where REXO isn't confident enough in a
-current exact endpoint to pre-fill one, and asks instead of guessing
-wrong) or takes a fully custom endpoint (`/connect` → `custom`, or
-`/provider add`). Local servers (Ollama, vLLM, LM Studio, llama.cpp's
-server, ...) work the same way via the `local` kind.
-
-**Google Gemini has a real, native driver** (`src/providers/gemini/`,
-`/connect` → Google Gemini) — Gemini's `generateContent`/
-`streamGenerateContent` APIs genuinely aren't OpenAI-compatible (a
-different auth header, and a completely different request/response shape
-— no `system`/`tool` roles, function calls and results live inline as
-message *parts* instead of separate fields), so pointing the
-OpenAI-compatible client at it, as an earlier version of this catalog
-briefly implied you could, always 401'd regardless of the key. **As of
-v0.6, it streams for real** — `streamGenerateContent?alt=sse`, parsed
-incrementally (its own SSE loop, separate from the OpenAI-style
-`choices[].delta` one every other provider shares via
-`protocol.rs`, since Gemini's chunk shape is different) — replacing the
-earlier "call the plain endpoint once, report the whole answer at the
-end" fallback. It's still genuinely untested against the live API: this
-project's own build/test sandbox can't reach
-`generativelanguage.googleapis.com` at all, so what's covered is the
-request-building and SSE chunk-assembly logic against hand-written
-example payloads, including a full multi-chunk stream strung together
-byte-by-byte (`cargo test -- gemini`), not an end-to-end call — please
-file an issue if the live shape has drifted from what's implemented.
-
-Anthropic and Cohere use their own genuinely different wire protocols too
-and don't have adapters yet — see [Known limitations](#known-limitations)
-rather than a catalog entry that would silently fail to connect. A native
-Gemini driver exists now specifically because it was the most-requested
-gap; the same `kind`-based pattern in `providers::build_provider` is what
-the next one would extend.
-
-```toml
-[model]
-provider = "nvidia"            # or "openai_compatible", "local", or "gemini"
-model = "moonshotai/kimi-k3"
-# base_url = "..."             # required for openai_compatible; optional
-                                # override for local (default: localhost:11434)
-```
-
-Setting `[model]` explicitly in a workspace `rexo.toml` overrides whatever
-your global default provider is *for that workspace only* — the layered
-resolution above.
-
-**Live model discovery**: `/model` and `/models` call the endpoint's
-`GET /models` (near-universal among OpenAI-compatible providers) and let
-you search the results, rather than a hard-coded, inevitably-stale model
-list. Falls back to manual entry when an endpoint doesn't support it —
-that's not an error, just not every server implements it.
-
-**Model capabilities**: `Provider::capabilities()` reports what's known
-about tool-calling/streaming/vision/reasoning support, and, new in v0.6,
-`parallel_tools`/`structured_output`/`model_discovery`/`context_window`/
-`max_output`/`cancellation`/`usage_reporting` too (`None` = genuinely
-unknown, not "no" — REXO doesn't have live capability data for most
-endpoints and won't fake confidence it doesn't have). `/status` now
-actually displays this (it didn't before v0.6 — the struct existed but
-nothing read it). Still advisory, not yet gating agent behavior — see
-[Known limitations](#known-limitations).
-
-**Normalized provider errors**: also new in v0.6 — every provider's HTTP
-and network failures get classified into a small closed
-`ProviderErrorKind` (`rate_limited`, `authentication`, `context_exceeded`,
-`timeout`, `network`, `server`, ...) via `classify_http_status`/
-`classify_reqwest_error` in `src/providers/mod.rs`, on top of the
-existing human-readable message (which is unchanged). The TUI tags
-retryable failures in the transcript (e.g. `[rate_limited, usually
-transient — worth trying again]`), and `rexo --output json` includes an
-`error_kind` field scripts can branch on instead of grepping message
-text. Kept as a genuinely closed enum, not a provider-defined string —
-see the architecture-quality notes on avoiding "stringly-typed runtime
-state."
-
-### Configuration
-
-`rexo.toml` (safe to commit — never put secrets in it) holds *workspace*
-overrides — agent limits, permissions, and an optional `[model]` section
-that beats your global default provider for this project specifically:
-
-```toml
-[agent]
-max_iterations = 50
-max_tool_calls = 100
-
-[model]
-provider = "nvidia"
-model = "moonshotai/kimi-k3"
-temperature = 0.3
-max_tokens = 4096
-reasoning_effort = "low"   # passed through as-is; ignored by providers that don't support it
-
-[permissions]
-allow_read = true
-allow_search = true
-allow_edit = false
-allow_terminal = false
-allow_git_write = false
-allow_network = false
-```
-
-(`rexo.toml` also ships with two commented-out fast-model alternatives —
-see [Speeding it up](#speeding-it-up).)
-
-`REXO_PROVIDER` / `REXO_MODEL` / `REXO_BASE_URL` environment variables
-override both `rexo.toml` and the global default provider, for this run.
-`REXO_<CREDENTIAL_KEY>_API_KEY` resolves a specific saved profile's key —
-see Providers above. `REXO_GLOBAL_DIR` overrides where the global
-directory itself lives (mainly useful for tests/portable installs).
-
-### CLI flags
-
-```
-rexo [OPTIONS] [PROMPT]...
-
-  <no prompt>              interactive session
-  "task description"       run once and exit (headless — see below)
-
-  -y, --yes                auto-approve every permission prompt
-      --non-interactive    never prompt; deny anything not pre-approved
-  -C, --workspace <DIR>    operate in DIR instead of the current directory
-      --model <MODEL>      override the configured model for this run
-      --provider <KIND>    override the provider for this run (nvidia|openai_compatible|local)
-      --base-url <URL>     override the API base URL for this run
-      --output <FORMAT>    text (default) | json | jsonl — see Headless mode
-      --fast                trim reasoning effort + token ceiling for this run
-      --no-intro            skip the animated startup intro (also: REXO_NO_INTRO=1)
-      --list-tools         print available tools and exit (no API key needed)
-```
-
-### Headless mode
-
-`rexo "task"` already ran once and exited (no TUI) — v0.3 adds
-scriptable output and exit codes on top of that, for CI/git-hooks/pipes:
-
-```powershell
+```bash
 rexo "fix the failing test" --output json
 ```
 
-prints exactly one JSON line (`{"status": "ok"|"error", "answer": ..., "error": ...}`)
-instead of the normal human-readable stream — `--output jsonl` is
-currently identical to `json` for a single-shot run (no per-token
-streaming JSONL yet; see [Known limitations](#known-limitations)) rather
-than pretending a difference that isn't implemented. Exit codes:
-
-| Code | Meaning |
-|---|---|
-| 0 | Completed successfully |
-| 1 | The task/request itself failed |
-| 2 | Configuration/credential error — couldn't even start (no API key, bad provider config, ...) |
-| 3 | *(reserved for permission/security rejection — not yet distinguished from code 1; see Known limitations)* |
-
-```powershell
-cat error.log | rexo "diagnose and fix this" --non-interactive --output json
-```
-
-### `@file` references
-
-Type `@src/main.rs` (or `@src/` for a directory listing) anywhere in your
-message and REXO resolves it to real file content before sending — the
-model doesn't burn a tool call reading something you already pointed at.
-A searchable picker pops up as you type after the `@`, respecting
-`.gitignore`, skipping binaries, and capping how much any one reference
-pulls in (~60KB) so `@src/` on a big tree doesn't blow your context.
-Multiple references in one message work fine: `@src/main.rs @Cargo.toml`.
-
-### Skills
-
-A skill is a folder with a `SKILL.md` inside — reusable, portable
-know-how the model can draw on, in the same spirit as Claude Skills, but
-not a claim of protocol compatibility with any specific product's format:
-
-```
-.rexo/skills/commit-style/SKILL.md      (project — checked into the repo)
-<global config dir>/skills/api-conventions/SKILL.md   (personal, every workspace)
-```
-
-```markdown
----
-name: commit-style
-description: How this repo writes commit messages
-triggers: commit, changelog
----
-Use imperative mood, a 72-character subject line, and reference the
-issue number when one exists.
-```
-
-`triggers` is an optional, comma-separated list of words — if one shows
-up (case-insensitively, plain substring match, not semantic search) in
-what you type, REXO loads that skill into the conversation automatically
-and says so in the transcript. `/skill <name>` loads one on demand
-regardless of triggers; `/skills` lists everything discovered, project
-and global, and shows which ones are already loaded this session. A
-project skill with the same `name:` as a global one replaces it.
-
-### Shell mode
-
-Type a bare `!` and press Enter to drop into shell mode: the input box
-border turns yellow and reads `SHELL MODE — ! or 'exit' to leave`, and
-every line you type from then on runs directly in PowerShell (Windows)
-or `sh` (Linux/macOS) — not sent to the model at all. Type `!` again, or
-`exit`, to leave (leaving shell mode, not REXO — `/exit` always quits
-REXO itself, even while shell mode is on).
-
-Don't want to switch modes for one command? `!<command>` runs it
-immediately regardless of which mode you're in — `!git status` works
-the same whether shell mode is on or off.
+Available output modes:
 
 ```text
-> !
-Shell mode on — every line now runs directly in PowerShell/sh, not the model.
-> git status
-On branch main
-nothing to commit, working tree clean
-> !
-Shell mode off.
+text
+json
+jsonl
 ```
 
-This is deliberately outside the agent's permission/security engine —
-you're the one typing the command, the same trust boundary as opening a
-real terminal window, not the model requesting one. REXO's permission
-prompts exist to gate what the *model* can do; they were never meant to
-gate what you type into your own shell.
-
-### Custom commands
-
-Drop a markdown file in `.rexo/commands/<name>.md` (project) or your
-global commands directory (personal, every workspace) and `/<name>`
-sends its contents to the model as a prompt:
-
-```markdown
 ---
-description: Review a diff against our style guide
+
+## 🧰 CLI
+
+Basic syntax:
+
+```bash
+rexo [OPTIONS] [PROMPT]
+```
+
+| Option | Description |
+|---|---|
+| `-y`, `--yes` | Automatically approve permissions |
+| `--non-interactive` | Never prompt for permissions |
+| `-C`, `--workspace <DIR>` | Use a different workspace |
+| `--model <MODEL>` | Override the model |
+| `--provider <KIND>` | Override the provider |
+| `--base-url <URL>` | Override the API base URL |
+| `--output <FORMAT>` | `text`, `json`, or `jsonl` |
+| `--fast` | Reduce reasoning/token budget |
+| `--no-intro` | Skip the animated startup intro |
+| `--list-tools` | Display available tools |
+
 ---
-Review this diff for style-guide violations. Focus area: $1
 
-$ARGUMENTS
+## ⌨️ Interactive Commands
+
+### Core
+
+```text
+/help
+/status
+/config
+/doctor
+/exit
+/quit
 ```
 
-`/review security @src/auth.rs` expands `$1` to `security` and
-`$ARGUMENTS` to everything typed after the command name (including the
-`@file` reference, which still resolves normally) before the turn runs.
-`/commands` lists what's discovered; an unused `$3` with only two
-arguments typed is left as literal text rather than silently blanked, so
-it's obvious something's missing.
+### Models & Providers
 
-### Interactive commands
-
-Inside an interactive session, you don't need to edit `rexo.toml` or
-restart to change anything — everything below takes effect immediately.
-This is the core set; run **`/help`** (or type **`{?}`** for just the
-keyboard shortcuts) for the complete, current list — around 50 commands as
-of v0.3.0, a handful marked `(planned)` and registered honestly rather
-than left out or faked:
-
-```
-/help                  Show the full-screen command browser
-{?}                    Show the keyboard shortcut list
-/status                Provider, model, workspace, permissions, limits
-/config                Non-secret configuration (rexo.toml-shaped)
-/doctor                Health-check: workspace, git, credentials, global config location
-
-/model [id]            Show/change model — search live, or enter any ID
-/models                List models available from the current endpoint
-
-/connect               Searchable provider picker; guided key/model/save setup
-/provider [name]       Switch to a saved profile, or a kind: nvidia|openai_compatible|local
-/provider add          Add a fully custom OpenAI-compatible endpoint
-/providers             List saved profiles + the built-in catalog
-
-/base-url [url]        Show/change the API base URL
-/api                   Show API key status (never the key itself)
-/api set               Set a key for this session; add --permanent to save it
-/api clear             Clear the session override (and the saved key, if any)
-
-/mcp                   List configured MCP servers
-/mcp add <name> --command "..." | --url "..."
-/mcp remove|enable|disable <name>
-
-/workspace [path]      Show/change the workspace directory
-/cd [path]             Same thing, shorter name
->  [path-or-fragment]  Quick workspace switch with real directory suggestions
-
-/permissions                            Show current permissions
-/permissions <kind> <always|ask>        kind = edit | create | delete | terminal | git
-
-/init                  Create REXO.md — project notes included in every system prompt
-/memory                View this workspace's REXO.md
-/export [file]          Save the conversation to a Markdown file
-/context               Rough estimate of how much conversation you're using
-/compact                Shrink older tool output to free up space
-
-/skills                List discovered skills (project + global)
-/skill <name>          Force-load a skill into the conversation now
-/commands              List your custom (user-defined) slash commands
-/add-dir [path]         Add a read-only extra directory; also remove/clear/list
-/copy [all|<n>]         Copy an answer (or the whole conversation) to the clipboard
-
-/tools                 List available tools (from the real tool registry)
-/clear                 Clear the conversation, keep configuration
-/reset                 Reload provider/model/permissions from rexo.toml/global config
-/exit, /quit, /q        Exit (bare "exit"/"quit" and double Ctrl+C also work)
+```text
+/model
+/models
+/provider
+/providers
+/connect
+/provider add
+/base-url
+/api
 ```
 
-Shortcuts worth knowing beyond the slash commands: a bare **`?`** as the
-very first character (before anything else is typed) opens the shortcut
-list immediately, same as `{?}`. **Alt+M**/**Alt+P** jump straight to the
-`/model`/`/provider` pickers from anywhere. **Ctrl+Y** toggles "selection
-mode" — it releases the terminal's own mouse capture so its native
-click-drag select-and-copy works normally, since having mouse capture on
-(which this screen needs for scroll-wheel support) is exactly what stops
-a terminal's own text selection from working. Run `/keybindings` or `{?}`
-for the complete, current list.
+### Workspace
 
-A few things worth knowing:
-
-- **Nothing here is a second copy of the agent.** Every command drives the
-  *same* `Agent`/`Provider`/`PermissionManager`/`ToolRegistry` the AI prompt
-  path uses — `/model` swaps the live provider in place, `/permissions`
-  mutates the live permission manager, `/workspace` moves the real
-  filesystem boundary every tool enforces. There's no restart and no stale
-  second state to fall out of sync.
-- **`/workspace`, `/cd`, and `>` all re-validate and re-apply the security
-  boundary.** Path traversal is blocked exactly the same way after
-  switching workspaces as before. Switching also clears any "always this
-  session" permission grants from the *previous* workspace, so trust
-  extended to one project doesn't silently carry into another opened in
-  the same run.
-- **REXO.md is this project's version of a persistent instructions file**
-  (create one with `/init`). If it exists, its contents go into the system
-  prompt on every turn, ahead of the auto-detected project type/tree/README
-  excerpt — explicit guidance you wrote beats REXO's own guesses.
-- **Commands marked `(planned)` in `/help` genuinely don't do anything
-  yet** — they print a short, honest note instead of either failing with
-  "unknown command" or silently pretending to work. See
-  [Roadmap](#roadmap).
-- **`/api set` never echoes the key.** Without `--permanent` it only
-  overrides the resolved key for this session (not written anywhere);
-  with `--permanent` it's saved to the global credential store — see
-  [Configuration, providers, and credentials](#configuration-providers-and-credentials).
-- **`/status` and `/config` structurally can't leak a key** — they're built
-  from a `configured: bool`, never from the key value itself. There are
-  tests asserting this (`cli::commands::tests::*never_contains_the_api_key*`).
-- **Model discovery isn't magic** — it depends on the endpoint actually
-  implementing `GET /models`. Most OpenAI-compatible providers do; some
-  don't, and `/model`/`/models` fall back to manual entry rather than
-  erroring when it isn't available.
-- **`/reset` reloads `rexo.toml`/env for your *current* workspace** and
-  clears the conversation, but deliberately leaves the workspace itself
-  alone — "reset configuration" and "go back to a different directory" are
-  different asks.
-
-## Project layout
-
-```
-src/
-├── main.rs                  CLI entry point
-├── cli/
-│   ├── mod.rs                 Session (runtime state) shared by all commands
-│   ├── parser.rs               line -> slash command / '>' shortcut / plain prompt
-│   ├── commands.rs             command table, handlers, provider catalog
-│   ├── completion.rs            slash-command + on-disk path suggestions (pure, no terminal dep)
-│   ├── output.rs                stdout-capture so command handlers can stay unchanged and still land in the TUI
-│   ├── trust_dialog.rs          ratatui startup workspace-trust screen
-│   └── tui/                    the persistent full-screen session (see Console UX)
-│       ├── mod.rs                 TuiCore: input, transcript, header sync, event loop, suspend/resume
-│       └── render.rs              pure drawing functions (header/transcript/input/help/permission modal)
-├── agent/
-│   ├── mod.rs                 agent loop (model → tool → permission → execute → repeat), plain + TUI variants
-│   ├── tui_support.rs          AgentUi trait the TUI implements to receive a turn's output
-│   ├── context/mod.rs         bounded project-context summary for the system prompt (incl. REXO.md)
-│   ├── planner/mod.rs         multi-step planning — scaffolding, not wired in yet
-│   └── prompts/mod.rs         system prompt text
-├── config/mod.rs             rexo.toml + env loading
-├── providers/
-│   ├── mod.rs                 Provider trait, ChatMessage/ToolCall types, provider selection
-│   ├── protocol.rs             shared OpenAI-compatible HTTP client + SSE stream parser
-│   ├── nvidia/                NVIDIA NIM
-│   ├── openai_compatible/     any OpenAI-compatible endpoint
-│   └── local/                 local model servers (Ollama, vLLM, ...)
-├── security/
-│   ├── policies/mod.rs         workspace-boundary + command-risk rules (stateless)
-│   └── permissions/mod.rs      approval flow (stateful: config + session + prompts), plain + interactive-modal variants
-├── tools/
-│   ├── mod.rs                  Tool trait, ToolRegistry
-│   ├── filesystem/, search/, patch/, terminal/, git/
-└── utils/mod.rs
+```text
+/workspace
+/cd
+/init
+/memory
+/add-dir
 ```
 
-Top-level, alongside `src/`:
+### Permissions
 
-```
-install.ps1, install.bat, uninstall.ps1    Windows — build from source, put rexo on PATH
-install.sh, uninstall.sh                    Linux/macOS — same, see Quickstart
-build.rs                                     cfg(windows)-gated: embeds assets/rexo.ico into rexo.exe
-assets/rexo.ico, assets/windows-terminal-profile.json
-LICENSE                                      MIT
-.github/workflows/ci.yml                     build + test on all 5 platforms, every push
-.github/workflows/release.yml                on a vX.Y.Z tag: build + publish all 5 to GitHub Releases
+```text
+/permissions
+/permissions edit always
+/permissions terminal ask
 ```
 
-## Speeding it up
+### Skills & Commands
 
-Response time is almost always the model, not REXO — Kimi K3 always reasons
-before answering, and no setting removes that step entirely (only how much).
-In order of impact:
+```text
+/skills
+/skill <name>
+/commands
+```
 
-1. **Switch models for everyday tasks.** `rexo.toml` has two fast,
-   still tool-calling-capable alternatives commented out under
-   `[model].model` — `nvidia/nemotron-3-nano-30b-a3b` (small/fast) or
-   `deepseek-ai/deepseek-v4-flash` (fast, good for small edits). Keep Kimi
-   K3 for genuinely hard, multi-file tasks where the extra thinking pays off.
-2. **Use `--fast`** for a one-off quick run — it trims `reasoning_effort`
-   to `"low"` and caps `max_tokens` at 2048 for that invocation only.
-3. **Lower `[model].max_tokens`** (default `4096`) permanently in
-   `rexo.toml` — caps how long a single turn, including reasoning, is
-   allowed to run.
+### Context & Output
 
-A multi-step task also means multiple full model turns (read → reason →
-edit → verify → ...) — each one reasons again from scratch, so total time
-scales with how many tool calls the task needs, not just model speed.
+```text
+/context
+/compact
+/copy
+/export
+```
 
-## Troubleshooting
+### Tools & Configuration
 
-**`rexo` isn't recognized as a command, even though I built it.** `cargo
-build`/`cargo run` never put anything on PATH — that's expected, not a
-bug. See [Running `rexo` from anywhere](#running-rexo-from-anywhere-not-just-this-folder)
-above.
+```text
+/tools
+/mcp
+/reset
+```
 
-**macOS says the download "cannot be opened because the developer cannot
-be verified" (or Gatekeeper just silently refuses it).** Expected — see
-the caveat under [Downloads](#downloads): these builds aren't
-code-signed or notarized (that needs a paid Apple Developer account,
-which isn't set up for this project). Run
-`xattr -d com.apple.quarantine rexo` in the folder you extracted it to,
-or right-click the binary → Open once, and macOS won't ask again.
+### Session Management
 
-**`install.sh`/`install.ps1` finished but a new terminal still can't
-find `rexo`.** The scripts append a PATH line to whichever shell rc file
-matches `$SHELL` (`~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`
-on Windows it's a registry edit, not a file) — if you use a shell they
-don't detect, or a login-shell setup that doesn't source that file (e.g.
-`~/.bash_profile` sourcing `~/.bashrc` isn't universal), add the printed
-install directory to PATH yourself. `REXO_INSTALL_DIR` lets you pick the
-directory up front instead.
+```text
+/resume
+/branch <name>
+/fork <name>
+/rewind
+```
 
-**There was a `rexo>` prompt at the bottom that didn't seem to do
-anything, below a box that looked like it should be the input.** Fixed —
-that was two separate things stacked on top of each other: a plain-printed
-banner (including a box that *looked* like an input field but was just
-static text) and, underneath it, `rustyline`'s own separate prompt, which
-was the only thing actually reading input. The whole session is now one
-persistent screen and the bordered box you see *is* the input — see
-[Console UX](#console-ux).
+---
 
-**A permission prompt appears and gets denied before I can answer it.**
-Fixed — earlier versions auto-detected "is this a real terminal?" to decide
-whether to prompt at all, and that detection could misfire on some Windows
-terminal setups (ConPTY-hosted consoles, certain launch wrappers), silently
-denying every prompt without ever waiting for input. REXO now only skips
-prompting when you explicitly pass `--yes` or `--non-interactive` — every
-other run genuinely waits for your answer, via a proper in-screen y/a/N
-modal.
+## ⌨️ Keyboard Shortcuts
 
-**It looks frozen after I send a prompt / PowerShell shows `exit code:
-0xc000013a, STATUS_CONTROL_C_EXIT`.** That exit code just means Ctrl+C was
-sent to the process — it's not a crash. REXO now shows a live spinner with
-an elapsed timer, then the model's reasoning dimmed as it streams in, so it
-shouldn't look frozen anymore. If a task is still taking too long, press
-Ctrl+C — REXO catches it and exits cleanly with `Cancelled.` See
-[Speeding it up](#speeding-it-up) above for making it actually faster.
+| Shortcut | Action |
+|---|---|
+| `Ctrl+C` | Cancel current operation |
+| `Ctrl+C` twice | Exit when input is empty |
+| `Ctrl+Y` | Toggle terminal selection mode |
+| `Alt+M` | Open model picker |
+| `Alt+P` | Open provider picker |
+| `?` | Open shortcut list |
+| `↑` / `↓` | Navigate history/pickers |
+| `Tab` | Complete commands/paths |
+| `Esc` | Cancel current interaction |
 
-**`NVIDIA_API_KEY is not set`, or any other "no API key found" message.**
-Run `/connect` (or, on first launch, just answer the setup wizard) and
-pick "Permanently" — that's the recommended path now. `.env`/shell
-environment variables still work too (see
-[Configuration](#configuration) for the `REXO_<KEY>_API_KEY` naming).
+---
 
-**A provider that worked from one project directory failed with `404 Not
-Found` (or similar) after switching to a different workspace.** This was
-the headline bug in versions before global configuration existed:
-provider/model settings and credentials were tied to whichever
-`rexo.toml`/`.env` happened to be in the directory you launched `rexo`
-from, so switching directories could silently lose them. Global,
-workspace-independent configuration (this version) fixes it structurally
-— see [Configuration, providers, and credentials](#configuration-providers-and-credentials).
-If you still see this on a fresh setup, it usually means the model ID
-isn't valid for the endpoint it's pointed at; `/doctor` and `/status` show
-exactly what's currently configured, and the error message itself now
-names the endpoint/model/status rather than a bare `404 Not Found`.
+## 🧠 Session Persistence
 
-## Development
+Rexo can save and restore conversations.
 
-```powershell
+```text
+/resume
+/resume list
+/resume <name>
+/branch <name>
+/fork <name>
+/rewind
+```
+
+`/branch` saves the current conversation as a named session without switching away from it.
+
+`/fork` saves a named divergence point and switches the current session to continue from that fork.
+
+`/rewind` truncates conversation history back to an earlier checkpoint.
+
+> **Note:** `/rewind` is conversation-only. It does not revert file edits. Workspace snapshots are not currently implemented.
+
+---
+
+## 🧪 Development
+
+Run basic checks:
+
+```bash
 cargo check
+```
+
+Run tests:
+
+```bash
 cargo test
+```
+
+List tools:
+
+```bash
 cargo run -- --list-tools
 ```
 
-Keep `cargo check` and `cargo test` green after any change — this is worked
-on incrementally, one module at a time, not all at once.
+Keep `cargo check` and `cargo test` green after changes.
 
-## Known limitations
+---
 
-Called out here rather than left implicit, per the principle this project
-tries to hold itself to: don't claim something works when it's only
-partially there.
+## 🏗️ Architecture
 
-- **MCP is configuration-only.** `/mcp` saves/lists server definitions in
-  global config, but REXO doesn't speak the MCP protocol to them yet — no
-  connection, capability discovery, or tool execution. What's there is the
-  layer that *will* route through the same permission engine as every
-  other tool once the protocol client exists, not a live integration today.
-- **Credentials are file-based, not an OS-encrypted vault.** See
-  [Configuration, providers, and credentials](#configuration-providers-and-credentials)
-  — real, workspace-independent, permission-hardened persistence, but not
-  Windows Credential Manager / macOS Keychain / a Secret Service item.
-- **Model capabilities are mostly "unknown".** `Provider::capabilities()`
-  covers 11 fields as of v0.6 (tool-calling/streaming/vision/reasoning/
-  parallel_tools/structured_output/model_discovery/context_window/
-  max_output/cancellation/usage_reporting) and is now shown in `/status`,
-  but nothing in the agent loop gates behavior on it yet (e.g. refusing a
-  vision request on a text-only model) — it's an honest "don't know" for
-  most endpoints and most fields, not a populated capability matrix.
-- **No adapters yet for non-OpenAI-compatible protocols** — Anthropic,
-  Cohere, AWS Bedrock. Not in the `/connect` catalog at all rather than
-  listed and silently broken. (Google Gemini *does* have a native adapter
-  — see [Providers](#providers) — this list is what's still missing.)
-- **No live pricing, context-window, or token-usage display.** `/context`
-  gives a rough character-count estimate labeled as such; REXO doesn't
-  maintain (and won't fabricate) a static pricing/context-window database
-  that would inevitably go stale.
-- **`--output jsonl` is currently identical to `json`** for a single-shot
-  run — no real per-token streaming JSONL yet.
-- **Exit code 3** (permission/security rejection) is reserved but not yet
-  distinguished from a generic task failure (code 1).
-- **`/compact` is a heuristic**, not a real summary — it replaces older
-  tool output with a placeholder; it doesn't ask the model to summarize.
-- **`search_files` is a plain recursive substring scan**, not fuzzy or
-  indexed.
-- **The workspace-trust dialog isn't remembered across runs** — it asks
-  again next time, even for a workspace you already trusted.
-- **`/add-dir` is real but read-only.** Extra directories you add are
-  reachable by `read_file`/`list_files` via an *absolute* path only —
-  `edit_file`/`create_file`/`delete_file`/`run_command`/git-write stay
-  scoped to the primary workspace alone, and `search_files` doesn't reach
-  them at all yet. A deliberate, safety-conscious scope-down from the
-  roadmap's full "multiple simultaneous working directories," not that
-  item finished — `/workspace`/`/cd` still switch rather than add for
-  anything beyond reading.
-- **`/copy` needs a reachable display server/clipboard.** It's a real OS
-  clipboard call (`arboard`), which means it can't do anything useful in
-  a headless/no-display environment (SSH without X forwarding, some CI) —
-  `/export` still works there. No conversation branching/forking, no
-  session persistence/resume, no rewind/checkpoints yet.
-- **Skills and custom commands are keyword/template-based, not smart.**
-  Skill triggers are plain case-insensitive substring matches (no
-  semantic search), and custom-command placeholders are literal string
-  substitution — both genuinely useful, neither claiming to be more than
-  that. See [Skills](#skills) and [Custom commands](#custom-commands).
-- **The Windows exe-icon embedding (`build.rs`/`winres`) builds in CI now
-  but its *appearance* is still unverified.** `ci.yml`/`release.yml` both
-  build it for real on Windows runners (it was never built at all when
-  this project's only build environment was its own Linux sandbox), so a
-  compile-time regression would now be caught — but nothing in CI opens
-  File Explorer and looks at the icon, so whether it actually shows up
-  correctly is still unconfirmed. Try a downloaded build and file an
-  issue if it doesn't show up.
-- **No hooks, subagents, worktree isolation, or background
-  sessions.** These are real, deliberately-out-of-scope-for-now
-  architecture directions (see the harness-related items in
-  [Roadmap](#roadmap)) rather than things REXO tried and got wrong — the
-  provider/tool/permission abstractions here were built with room for them,
-  but building them out is future work, not a partial/broken feature today.
+Rexo is organized into independent layers:
 
-## Roadmap
+```text
+src/
+├── main.rs
+├── cli/
+│   ├── parser.rs
+│   ├── commands.rs
+│   ├── completion.rs
+│   ├── trust_dialog.rs
+│   └── tui/
+│
+├── agent/
+│   ├── mod.rs
+│   ├── context/
+│   ├── planner/
+│   └── prompts/
+│
+├── config/
+│
+├── providers/
+│   ├── nvidia/
+│   ├── openai_compatible/
+│   ├── local/
+│   └── gemini/
+│
+├── security/
+│   ├── policies/
+│   └── permissions/
+│
+├── tools/
+│   ├── filesystem/
+│   ├── search/
+│   ├── patch/
+│   ├── terminal/
+│   └── git/
+│
+└── utils/
+```
 
-- [x] Tool trait, registry, JSON schemas
-- [x] Provider abstraction + NVIDIA/OpenAI-compatible/local providers, real SSE streaming
-- [x] Agent loop with iteration/tool-call safety limits
-- [x] Permission engine + command-risk/workspace-boundary policy layer
-- [x] File editing (`edit_file`/`create_file`/`delete_file`)
-- [x] Bounded project context (type detection, top-level tree, README excerpt, REXO.md)
-- [x] Basic git tool
-- [x] Interactive CLI with live streaming, spinner, and Ctrl+C cancellation
-- [x] Slash-command layer with runtime provider/model/workspace switching — no restart needed
-- [x] Startup workspace-trust dialog (real `ratatui` screen)
-- [x] Tab-completion for slash command names and workspace paths
-- [x] A full persistent TUI (fixed header + scrollable transcript + one
-      real input box, the whole session as one continuously redrawn
-      `ratatui` frame), plus mouse-wheel scrolling — see [Console UX](#console-ux)
-- [x] Full-screen `/help` browser with a single source of truth for
-      keybindings (`{?}`, `/keybindings`, and the help screen all read the
-      same table), ~50 commands total
-- [x] `install.ps1`/`install.bat`/`uninstall.ps1` to put `rexo` on PATH
-- [x] `/doctor` health checks
-- [x] **Workspace-independent global configuration** — the v0.2→v0.3
-      headline fix: provider/model/credentials no longer live-and-die with
-      whichever `rexo.toml`/`.env` happened to be in the current directory
-- [x] Persistent, workspace-independent credential storage
-      (`config::credentials`)
-- [x] Named, saved provider profiles (`/connect`'s "Permanently", `/provider <name>`)
-- [x] First-launch setup wizard, with v0.2-config migration offer
-- [x] Searchable `/connect` over an extensible provider catalog (~18 presets)
-- [x] Live model discovery (`GET /models`) with search, manual entry, and
-      provider-default fallback
-- [x] `Provider::capabilities()` — tool-calling/streaming/vision/reasoning,
-      plus (new in v0.6) parallel_tools/structured_output/model_discovery/
-      context_window/max_output/cancellation/usage_reporting, honestly
-      "unknown" where REXO doesn't have real data — and now actually
-      displayed in `/status`, not just defined
-- [x] Actionable provider error messages (endpoint/model/status/likely
-      causes, never the key) instead of a bare HTTP status
-- [x] Normalized provider errors (v0.6) — every provider's failures
-      classified into a closed `ProviderErrorKind` enum
-      (`rate_limited`/`authentication`/`context_exceeded`/... — see
-      [Providers](#providers)), surfaced in the TUI and in
-      `rexo --output json`'s new `error_kind` field
-- [x] `REXO_<PROVIDER>_API_KEY`-namespaced credential env vars, alongside
-      legacy unnamespaced ones for v0.2 compatibility
-- [x] MCP server *configuration* (`/mcp`) — protocol/execution wiring is
-      the next step, see [Known limitations](#known-limitations)
-- [x] `@file` references with an ignore-aware searchable picker
-- [x] Headless mode (`--output json`, scriptable exit codes)
-- [x] Shell mode (v0.6) — bare `!` toggles running raw PowerShell/`sh`
-      commands directly instead of going through the model;
-      `!<command>` runs one command regardless of mode
-- [x] Startup intro animation (v0.7), with `--no-intro`/`REXO_NO_INTRO` to skip it
-- [x] First-launch wizard on real arrow-key/masked-input pickers (v0.7),
-      not blocking numbered-list prompts — deferred since v0.4.0
-- [x] Session persistence, `/resume`, `/branch`, `/rewind` (v0.7.1) —
-      conversation-level (see the caveat below); `/fork` too, scoped
-      honestly as a saved divergence point, not background execution
+Runtime component flow:
 
-**On `/background`, `/agents`, and a real `/mcp` protocol client** — all
-still show `(planned)` in `/help`, deliberately, not by oversight.
-`/background`/`/agents` need git-worktree isolation so a background or
-parallel run can't collide with the workspace you're actively looking
-at, on top of the session system that now exists — that isolation layer
-is still a from-scratch subsystem, not a small addition. `/mcp`
-currently only *configures* a server entry (§40 in the project's own
-architecture doc) — actually speaking the protocol means a JSON-RPC
-client over stdio/SSE, a capability handshake, and wiring discovered
-tools through the existing permission engine so an MCP tool is gated
-exactly like a native one. Neither is a command to bolt on; each is
-closer to its own release.
+```text
+CLI ──► Agent ──┬──► Provider
+                ├──► Tool Registry
+                ├──► Permission Manager
+                ├──► Security Policies
+                └──► Project Context
+```
 
-Also worth being precise about since it's easy to overstate: `/rewind`
-is **conversation-only**. It truncates chat history back to an earlier
-point; it does not revert any file edits the agent made after that
-point. Reverting file state too would need workspace snapshots
-(git-based or otherwise), which isn't built — `/rewind`'s own output
-says this every time, not just here.
-- [ ] MCP protocol client: connect, discover tools/resources/prompts,
-      execute through the existing permission engine
-- [ ] Capability-aware agent behavior (actually gating on
-      `Provider::capabilities()`, not just displaying it)
-- [x] Native Google Gemini driver, with real SSE streaming as of v0.6 —
-      still untested against the live API (see [Providers](#providers))
-- [ ] Native (non-OpenAI-compatible) provider adapters: Anthropic, Cohere,
-      AWS Bedrock
-- [ ] Text/XML tool-call fallback protocol for models without native tool calling
-- [ ] Capability-aware provider fallback (don't fail over to a model that
-      can't do what the task needs)
-- [x] Multiple simultaneous working directories, read-only (`/add-dir`) —
-      write tools still scoped to the primary workspace only
-- [x] Clipboard integration (`/copy`, real OS clipboard via `arboard`)
-- [x] Arrow-key, type-to-filter pickers for `/connect`/`/model`/`/models`/
-      `/provider`, fully in-TUI (masked API-key entry included)
-- [x] A skills system (`.rexo/skills/`, keyword-triggered + `/skill`)
-- [x] Custom commands (`.rexo/commands/`, `$ARGUMENTS`/`$1..$9`)
-- [ ] Real, model-generated conversation summarization (`/compact` is a
-      placeholder-substitution heuristic today, not a summary)
-- [ ] Live provider-reported token usage / cost display (no fabricated
-      pricing — see [Known limitations](#known-limitations))
-- [ ] Persisted workspace-trust decisions (currently asks every run)
-- [ ] OS-native credential storage (Credential Manager/Keychain/Secret
-      Service) as an alternative credential backend
-- [ ] Faster/smarter search (currently a plain recursive substring scan)
-- [ ] Config-file-level command allow/deny customization
-- [ ] Broader automated test coverage (currently thorough unit tests per
-      module; no end-to-end integration harness yet)
-- [x] Packaged releases (GitHub Releases, five platforms — see
-      [Downloads](#downloads)); crates.io publishing not done yet
-- [ ] Editor/IDE integration (`/ide`) and an installable plugin system
-      (`/plugin`) — both registered commands today, honestly `(planned)`
+---
 
-### Harness direction (longer-term, architected for but not built)
+## 🚧 Current Status — v0.7.3
 
-The provider/tool/permission abstractions here were designed with room for
-these, but they're genuinely separate, sizable pieces of work — listed
-honestly as direction, not partially-built features:
+Rexo Code v0.7.3 is a working early-stage AI coding agent with:
 
-- Repository-level lifecycle hooks (`.rexo/hooks.toml`: pre/post-tool-use,
-  session start/end, ...) — sandboxed, permission-aware, disableable
-- A skill system (`.rexo/skills/`: named, capability-limited workflows)
-- Session checkpoints and explicit `/rewind` (beyond what `git` already gives you)
-- Background sessions (run a task without occupying the foreground session)
-- Git-worktree isolation for background/parallel tasks, with an explicit
-  review-and-merge step — never an automatic silent merge
-- Controlled subagents with isolated context, limited tools, and hard
-  resource limits (`max_depth`/`max_agents`/`max_runtime`/`max_tool_calls`)
-- Machine-maintained project memory (`.rexo/memory/`), kept explicitly
-  subordinate to human-authored `REXO.md`
+- ✅ Agent loop with real tool calling
+- ✅ Streaming responses
+- ✅ Native Gemini SSE streaming
+- ✅ OpenAI-compatible provider support
+- ✅ NVIDIA NIM support
+- ✅ Local model support
+- ✅ Persistent full-screen terminal UI
+- ✅ Animated startup intro
+- ✅ Interactive provider/model pickers
+- ✅ First-launch setup wizard
+- ✅ Workspace trust dialog
+- ✅ Permission engine
+- ✅ Command-risk classification
+- ✅ Workspace filesystem boundaries
+- ✅ Git integration
+- ✅ Skills
+- ✅ Custom commands
+- ✅ `@file` references
+- ✅ Shell mode
+- ✅ Headless JSON output
+- ✅ Global configuration
+- ✅ Persistent provider credentials
+- ✅ Named provider profiles
+- ✅ Session persistence
+- ✅ `/resume`
+- ✅ `/branch`
+- ✅ `/fork`
+- ✅ `/rewind`
+- ✅ Packaged releases for five target platforms
 
-## License
+Rexo has not yet been run against a large real-world codebase at scale. Treat it as a working foundation rather than a finished product.
 
-MIT — see `LICENSE` (add one before publishing; not included in this
-scaffold).
+---
 
-## Contributing
+## ⚠️ Known Limitations
 
-This is meant to be genuinely useful and openly developed, not a closed
-demo. Issues and PRs welcome once this is pushed to a public repo. Please
-keep the security model in mind: nothing in `tools/`, `security/`, or
-`providers/` should quietly widen what the agent is allowed to do without
-it being an explicit, reviewable change.
+Rexo aims to be explicit about what is implemented versus what is still being built.
+
+- **MCP is configuration-only.** `/mcp` can save and manage server definitions, but the MCP protocol client and tool execution are not implemented yet.
+- **Credentials are file-based.** They are not currently stored in Windows Credential Manager, macOS Keychain, or another OS-native encrypted vault.
+- **Model capabilities are mostly advisory.** Capability information can be displayed, but the agent does not yet gate behavior based on every capability.
+- **Native non-OpenAI-compatible adapters are incomplete.** Anthropic, Cohere, and AWS Bedrock native adapters are not implemented yet. Google Gemini has a native adapter.
+- **No live pricing/token-cost database.** Rexo avoids fabricating provider pricing or context-window data.
+- **`--output jsonl` is currently equivalent to `json` for a single-shot run.**
+- **Exit code 3 is reserved** for permission/security rejection but is not yet distinguished from a generic task failure.
+- **`/compact` is heuristic-based**, not model-generated summarization.
+- **`search_files` is a recursive substring scan**, not indexed or fuzzy search.
+- **Workspace trust is not persistent** across runs.
+- **`/add-dir` is read-only.** Write tools remain restricted to the primary workspace.
+- **`/copy` requires a usable system clipboard/display environment.**
+- **Skills and custom commands are keyword/template-based**, rather than semantic.
+- **Windows executable icon appearance is not independently verified by CI.**
+- **Hooks, subagents, worktree isolation, and background sessions are not implemented yet.**
+
+---
+
+## 🗺️ Roadmap
+
+### Agent
+
+- [ ] Capability-aware agent behavior
+- [ ] Smarter planning
+- [ ] Subagents
+- [ ] Background sessions
+- [ ] Model-generated conversation summarization
+
+### Providers
+
+- [ ] Native Anthropic adapter
+- [ ] Native Cohere adapter
+- [ ] Native AWS Bedrock adapter
+- [ ] Capability-aware provider fallback
+- [ ] Tool-call fallback for models without native tool calling
+
+### Security
+
+- [ ] Config-level command allow/deny customization
+- [ ] OS-native credential storage
+- [ ] Persistent workspace trust
+- [ ] Stronger workspace isolation
+
+### Developer Experience
+
+- [ ] Faster indexed search
+- [ ] IDE/editor integration
+- [ ] Installable plugin system
+- [ ] Live provider token/cost reporting
+
+### Infrastructure
+
+- [x] CI
+- [x] Packaged GitHub releases
+- [x] SHA-256 release checksums
+- [ ] Broader end-to-end testing
+- [ ] `crates.io` publishing
+
+### MCP
+
+- [ ] MCP protocol client
+- [ ] Server connection
+- [ ] Capability discovery
+- [ ] Resource/prompt discovery
+- [ ] Tool execution through the existing permission engine
+
+---
+
+## 🤝 Contributing
+
+Rexo Code is open source and contributions are welcome.
+
+Whether you're submitting bug reports, feature requests, documentation improvements, or pull requests, please keep the security model in mind.
+
+Changes to security-sensitive areas such as:
+
+```text
+tools/
+security/
+providers/
+permissions/
+```
+
+should maintain explicit, reviewable behavior and should not silently widen what the agent is allowed to do.
+
+---
+
+## 💚 Support Rexo Code
+
+Rexo Code is **free and open source**, built independently with the goal of making powerful AI developer tooling accessible to everyone.
+
+If Rexo Code has been useful to you, your support helps keep development, maintenance, testing, and future releases moving forward.
+
+- **[Support on Ko-fi](https://ko-fi.com/dakshislegend)**
+- **[Support on Patreon](https://www.patreon.com/cw/FronoBear)**
+
+---
+
+## 💬 Community
+
+Join the Rexo Code community:
+
+**[Discord — Rexo Code Community](https://discord.gg/KvBVgQYZh)**
+
+Use the community for:
+
+- Releases
+- Support
+- Bug reports
+- Feature discussions
+- Development updates
+- Community projects
+
+---
+
+## 🔐 Security
+
+If you discover a security issue, please avoid posting sensitive exploit details publicly until the issue can be reviewed.
+
+Never commit API keys or credentials.
+
+Rexo configuration files such as `rexo.toml` should never contain real secrets. Use the credential system or environment variables instead.
+
+If a credential is ever exposed, rotate it immediately.
+
+---
+
+## 📄 License
+
+Rexo Code is released under the **MIT License**.
+
+See [`LICENSE`](LICENSE) for details.
+
+---
+
+<div align="center">
+
+### ⚡ Rexo Code
+
+**Your terminal. Your models. Your code.**
+
+Open source • Provider-agnostic • Rust • Cross-platform
+
+<br>
+
+⭐ GitHub • 📦 Releases • 💬 Discord • ☕ Ko-fi • ❤️ Patreon
+
+</div>
