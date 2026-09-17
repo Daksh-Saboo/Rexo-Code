@@ -1,0 +1,92 @@
+# Continuous integration: build (and, where a native runner exists, test)
+# Rexo Code on every platform it ships for. This is what actually backs
+# the "cross-platform" claim — a target that only ever gets cross-checked
+# from Linux, never built by its own OS, isn't a verified target.
+#
+# Five targets, matching the five downloads in the README:
+#   - Linux            x86_64-unknown-linux-gnu   (native: ubuntu-latest)
+#   - macOS Intel       x86_64-apple-darwin        (native: macos-13)
+#   - macOS Apple Silicon aarch64-apple-darwin     (native: macos-14)
+#   - Windows x64       x86_64-pc-windows-msvc     (native: windows-latest)
+#   - Windows ARM64      aarch64-pc-windows-msvc    (cross-linked on
+#                                                     windows-latest — MSVC's
+#                                                     linker cross-links ARM64
+#                                                     without needing an
+#                                                     ARM64 runner; GitHub
+#                                                     doesn't offer a hosted
+#                                                     Windows-on-ARM runner
+#                                                     as of this writing, so
+#                                                     this leg builds but
+#                                                     can't run the test
+#                                                     suite — see the `test`
+#                                                     step's `if:` guard)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            can_test: true
+          - name: macOS Intel
+            os: macos-13
+            target: x86_64-apple-darwin
+            can_test: true
+          - name: macOS Apple Silicon
+            os: macos-14
+            target: aarch64-apple-darwin
+            can_test: true
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            can_test: true
+          - name: Windows ARM64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            can_test: false # cross-linked; no hosted ARM64 Windows runner to execute on
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # arboard's X11 backend on Linux talks XCB directly and doesn't need
+      # libX11, but it does need the xcb client headers to build.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Test
+        if: matrix.can_test
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Clippy
+        if: matrix.can_test
+        run: cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings
+        continue-on-error: true # advisory for now — see README's testing-architecture notes

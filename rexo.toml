@@ -1,0 +1,46 @@
+# Rexo Code configuration.
+#
+# This file is safe to commit — it never contains secrets. API keys live in
+# environment variables / .env instead (see .env.example).
+
+[agent]
+# Maximum number of model turns in a single run before REXO stops for safety.
+max_iterations = 50
+# Maximum total tool calls (across all turns) in a single run.
+max_tool_calls = 100
+
+[model]
+# One of: "nvidia", "openai_compatible", "local".
+provider = "nvidia"
+model = "moonshotai/kimi-k3"
+# ^ Kimi K3 always reasons before answering — great for hard, multi-file
+# tasks, but that reasoning step is inherently slow, and no setting below
+# removes it entirely. For everyday quick edits/questions, swap in a fast
+# instruct model instead (still tool-calling capable, no forced reasoning):
+#   model = "nvidia/nemotron-3-nano-30b-a3b"   # small + fast
+#   model = "deepseek-ai/deepseek-v4-flash"    # fast, good for small edits
+# Keep Kimi K3 (or bump back up to reasoning_effort/max_tokens below) for
+# genuinely hard, multi-step tasks where the extra thinking pays off.
+
+# Required for provider = "openai_compatible" or to override provider = "local"'s
+# default (http://localhost:11434). Ignored by "nvidia".
+# base_url = "https://openrouter.ai/api/v1/chat/completions"
+temperature = 0.3
+# Lower = faster worst case (caps how long a single turn can run, including
+# the model's reasoning). Raise if answers are getting cut off mid-thought.
+max_tokens = 4096
+# Passed through as-is to providers that support it. Kimi K3 supports
+# "low", "high", "max" (no "medium") and always reasons regardless — this
+# only controls *how much*. Ignored by non-reasoning models.
+reasoning_effort = "low"
+
+[permissions]
+# Automatic (no prompt):
+allow_read = true
+allow_search = true
+# Ask for approval every time unless set true here (not recommended to set
+# these true globally — approve per-session with 'a' at the prompt instead):
+allow_edit = false
+allow_terminal = false
+allow_git_write = false
+allow_network = false

@@ -1,0 +1,130 @@
+# Builds a real, downloadable rexo binary for all five platforms and
+# attaches them to a GitHub Release. This is the actual "download" path —
+# CI (ci.yml) proves every target *builds*; this workflow is what makes a
+# built binary something a person can fetch without owning a Rust
+# toolchain.
+#
+# Triggered by pushing a tag like `v0.5.0`. Each matrix leg builds on its
+# *own* OS (native, not cross-compiled from Linux — macOS binaries need
+# Apple's own linker/SDK, which isn't legally redistributable for
+# cross-compilation, so "native runner per OS" is the correct approach
+# here, not a shortcut) and uploads a zip/tar.gz containing:
+#   rexo(.exe), README.md, LICENSE, the matching install script, and,
+#   for Windows, rexo.ico + windows-terminal-profile.json.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (e.g. v0.5.0)"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: rexo
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - name: windows-aarch64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage package contents (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="stage/rexo-code-${{ matrix.name }}"
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$STAGE/"
+          cp README.md LICENSE "$STAGE/"
+          cp install.sh uninstall.sh "$STAGE/"
+          chmod +x "$STAGE/${BIN_NAME}" "$STAGE/install.sh" "$STAGE/uninstall.sh"
+          tar -C stage -czf "rexo-code-${{ matrix.name }}.tar.gz" "rexo-code-${{ matrix.name }}"
+
+      - name: Stage package contents (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Stage = "stage/rexo-code-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $Stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" $Stage
+          Copy-Item README.md, LICENSE, install.ps1, install.bat, uninstall.ps1 $Stage
+          Copy-Item assets/rexo.ico, assets/windows-terminal-profile.json $Stage
+          Compress-Archive -Path "$Stage/*" -DestinationPath "rexo-code-${{ matrix.name }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rexo-code-${{ matrix.name }}
+          path: rexo-code-${{ matrix.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: dist/*
+          generate_release_notes: true

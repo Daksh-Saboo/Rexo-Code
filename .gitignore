@@ -1,0 +1,9 @@
+/target
+.env
+*.log
+.DS_Store
+/stage
+/dist
+rexo-code-*.tar.gz
+rexo-code-*.zip
+SHA256SUMS.txt

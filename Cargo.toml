@@ -1,0 +1,69 @@
+[package]
+name = "rexo-code"
+version = "0.7.3"
+edition = "2021"
+description = "Rexo Code — an open-source, provider-agnostic AI coding agent"
+license = "MIT"
+readme = "README.md"
+
+[[bin]]
+name = "rexo"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+# Full persistent TUI: alternate screen, a fixed header, a scrollable
+# transcript pane, and a bordered input box — see src/cli/tui/mod.rs.
+# `event-stream` gives an async Stream of input events so key handling can
+# be `select!`-ed alongside network I/O; `mouse` lets the transcript
+# respond to the scroll wheel (see the same module for both).
+crossterm = { version = "0.27", features = ["event-stream"] }
+# Parses the ANSI escape codes the `colored` crate already produces (used
+# throughout src/cli/commands.rs) into styled ratatui `Text`, so slash
+# command output can be captured off real stdout and dropped straight into
+# the transcript pane instead of every handler needing to be rewritten
+# against a ratatui-specific API. See src/output.rs.
+ansi-to-tui = "4.1"
+# OS-appropriate per-user config/data directory resolution (%LOCALAPPDATA%
+# on Windows, XDG dirs on Linux, Application Support on macOS) — see
+# src/config/global.rs.
+dirs = "5"
+dotenvy = "0.15"
+futures-util = "0.3"
+# Respects .gitignore/.ignore when walking the workspace for `@file`
+# reference autocomplete (src/cli/file_ref.rs) — the same crate ripgrep
+# uses for this, rather than a hand-rolled, likely-incomplete walker.
+ignore = "0.4"
+ratatui = "0.26"
+# Default TLS backend (native-tls: SChannel on Windows, Secure Transport on
+# macOS, OpenSSL on Linux) rather than rustls, so a fresh Windows checkout
+# builds without needing OpenSSL installed separately.
+reqwest = { version = "0.12", features = ["json", "stream"] }
+# Hidden-echo terminal input for API keys. Falls back to a visible prompt
+# if hidden input isn't available in a given terminal environment — see
+# `cli::commands::read_hidden_line`.
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+toml = "0.8"
+# Real OS clipboard access for /copy (Win32 clipboard on Windows via
+# clipboard-win, X11 on Linux) — see src/utils/clipboard.rs. Never called
+# from a test: there's no display server in CI/this project's sandbox.
+# `default-features = false` drops arboard's optional image-clipboard
+# support (and the image-decoding crate chain that pulls in) — /copy only
+# ever needs plain text.
+arboard = { version = "3", default-features = false }
+
+# Embeds assets/rexo.ico into rexo.exe's resources on Windows only — see
+# build.rs. `cfg(windows)` means this is never even resolved/downloaded
+# on a non-Windows host, so it can't affect this project's Linux build
+# sandbox at all.
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "test-util"] }

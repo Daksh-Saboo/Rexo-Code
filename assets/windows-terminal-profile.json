@@ -1,0 +1,15 @@
+{
+  "//": "A Windows Terminal *fragment* for Rexo Code — gives it its own tab icon and name instead of the generic PowerShell one. Windows Terminal doesn't read an exe's embedded icon resource for its own tab; it only looks at a profile's own \"icon\" field, which is why this is a separate file rather than something rexo.exe can set at runtime (see cli::tui::set_console_title's doc comment for the full breakdown of title vs. icon).",
+
+  "//install": "Copy this file to %LOCALAPPDATA%\\Microsoft\\Windows Terminal\\Fragments\\RexoCode\\rexo.json (create the folders if needed) and restart Windows Terminal — it'll pick up 'Rexo Code' as a profile in the New Tab dropdown automatically. No edit to your own settings.json required.",
+
+  "profiles": [
+    {
+      "name": "Rexo Code",
+      "commandline": "rexo.exe",
+      "icon": "%LOCALAPPDATA%\\RexoCode\\bin\\rexo.ico",
+      "startingDirectory": "%USERPROFILE%",
+      "colorScheme": "One Half Dark"
+    }
+  ]
+}
