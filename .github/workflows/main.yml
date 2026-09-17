@@ -1,0 +1,39 @@
+name: Test Rexo Code
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout GitHub source
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rexo
+        run: cargo build --release
+
+      - name: Test version
+        shell: pwsh
+        run: |
+          .\target\release\rexo.exe --version
+
+      - name: Test help
+        shell: pwsh
+        run: |
+          .\target\release\rexo.exe --help
+
+      - name: Test binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\target\release\rexo.exe")) {
+            Write-Error "Rexo executable was not built!"
+            exit 1
+          }
+
+          Write-Host "Rexo binary exists."
+          Write-Host "GitHub source build test passed!"
