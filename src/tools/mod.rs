@@ -15,8 +15,10 @@
 
 pub mod filesystem;
 pub mod git;
+pub mod mcp_proxy;
 pub mod patch;
 pub mod search;
+pub mod tasks;
 pub mod terminal;
 
 use std::collections::BTreeMap;

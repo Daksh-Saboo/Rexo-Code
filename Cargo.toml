@@ -1,6 +1,6 @@
 [package]
 name = "rexo-code"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2021"
 description = "Rexo Code — an open-source, provider-agnostic AI coding agent"
 license = "MIT"
@@ -37,6 +37,11 @@ futures-util = "0.3"
 # reference autocomplete (src/cli/file_ref.rs) — the same crate ripgrep
 # uses for this, rather than a hand-rolled, likely-incomplete walker.
 ignore = "0.4"
+# Same glob engine `ignore` already uses internally for .gitignore-style
+# matching — reused directly by src/hooks/mod.rs for a hook's `matcher`
+# pattern (e.g. "edit_*") rather than hand-rolling glob matching a
+# second time.
+globset = "0.4"
 ratatui = "0.26"
 # Default TLS backend (native-tls: SChannel on Windows, Secure Transport on
 # macOS, OpenSSL on Linux) rather than rustls, so a fresh Windows checkout
@@ -48,15 +53,22 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "process", "io-util"] }
 toml = "0.8"
 # Real OS clipboard access for /copy (Win32 clipboard on Windows via
-# clipboard-win, X11 on Linux) — see src/utils/clipboard.rs. Never called
-# from a test: there's no display server in CI/this project's sandbox.
-# `default-features = false` drops arboard's optional image-clipboard
-# support (and the image-decoding crate chain that pulls in) — /copy only
-# ever needs plain text.
-arboard = { version = "3", default-features = false }
+# clipboard-win, X11 on Linux) — see src/utils/clipboard.rs — and, with
+# default features restored (see docs/adr on Alt+V below), clipboard
+# *image* reads for Alt+V paste. Image encoding to PNG for the wire is
+# still our own job — see the `image` dependency below.
+arboard = "3"
+# Alt+V pastes a clipboard image straight into the next message for a
+# vision-capable model (src/cli/tui/mod.rs's Alt+V handler, and
+# src/providers/protocol.rs's multipart image_url wire format). arboard
+# hands back raw RGBA8 bytes; `image` (PNG encoder only — no other
+# format support pulled in) turns that into the PNG bytes the wire
+# format's data: URL actually needs.
+image = { version = "0.24", default-features = false, features = ["png"] }
+base64 = "0.22"
 
 # Embeds assets/rexo.ico into rexo.exe's resources on Windows only — see
 # build.rs. `cfg(windows)` means this is never even resolved/downloaded

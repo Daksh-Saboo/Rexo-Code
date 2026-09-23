@@ -41,6 +41,26 @@ pub struct ToolCall {
     pub arguments: String,
 }
 
+/// A single image attached to a user message — currently only produced by
+/// Alt+V (clipboard paste; see `cli::tui::paste_image_from_clipboard`).
+/// Kept as already-encoded PNG bytes (base64) rather than raw pixels: the
+/// wire format wants base64 either way, and this is the one place that
+/// encoding has to happen regardless of how many providers a message
+/// eventually gets sent to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageAttachment {
+    /// Always "image/png" today (arboard's raw clipboard capture is
+    /// re-encoded to PNG on the way in) — kept as a field rather than a
+    /// hard-coded literal at every call site so a future non-clipboard
+    /// image source (e.g. `@screenshot.jpg`) doesn't need a wire-format
+    /// change too.
+    pub mime: String,
+    /// Base64-encoded image bytes, no `data:` prefix — providers that
+    /// want a data URL build it themselves (see `protocol.rs`'s
+    /// `WireMessage` conversion).
+    pub base64_data: String,
+}
+
 /// One message in the conversation, in our own provider-agnostic shape.
 /// Providers translate to/from their wire format at the edges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +82,12 @@ pub struct ChatMessage {
     /// Present only on `Role::Tool` messages: the tool's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Alt+V-pasted images on a user message. Empty for every other role
+    /// and for the overwhelming majority of user messages — see
+    /// `ImageAttachment`'s docs for why this is base64 PNG rather than
+    /// raw pixels.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImageAttachment>,
 }
 
 impl ChatMessage {
@@ -73,6 +99,7 @@ impl ChatMessage {
             tool_calls: Vec::new(),
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
         }
     }
 
@@ -84,6 +111,22 @@ impl ChatMessage {
             tool_calls: Vec::new(),
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
+        }
+    }
+
+    /// Same as [`Self::user`], plus one or more clipboard-pasted images
+    /// (Alt+V) attached alongside the text. `text` may be empty — "just
+    /// look at this" with no words is a normal thing to send.
+    pub fn user_with_images(text: impl Into<String>, images: Vec<ImageAttachment>) -> Self {
+        Self {
+            role: Role::User,
+            content: Some(text.into()),
+            reasoning: None,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            name: None,
+            images,
         }
     }
 
@@ -95,6 +138,7 @@ impl ChatMessage {
             tool_calls,
             tool_call_id: None,
             name: None,
+            images: Vec::new(),
         }
     }
 
@@ -106,6 +150,7 @@ impl ChatMessage {
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
             name: Some(name.into()),
+            images: Vec::new(),
         }
     }
 }

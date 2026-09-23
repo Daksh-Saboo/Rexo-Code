@@ -1,8 +1,12 @@
 mod agent;
 mod cli;
 mod config;
+mod hooks;
+mod ide;
+mod mcp;
 #[macro_use]
 mod output;
+mod plugins;
 mod providers;
 mod security;
 mod tools;
@@ -307,7 +311,16 @@ async fn run_single_shot(
     prompt: &str,
     json_mode: bool,
 ) -> Result<String> {
-    if json_mode {
+    let show_hook_notes = |notes: Vec<String>| {
+        if !json_mode {
+            for n in notes {
+                println!("{} {n}", "hook:".dimmed());
+            }
+        }
+    };
+    show_hook_notes(agent.run_session_start_hooks());
+
+    let result = if json_mode {
         // Machine-readable output must be exactly one JSON line — nothing
         // else on stdout. The plain (non-TUI) agent path's streamed
         // tokens/tool-call lines go through the same capture-aware
@@ -322,5 +335,8 @@ async fn run_single_shot(
         println!("{} {}", ">".bright_black(), prompt);
         println!();
         agent.respond(history, prompt).await
-    }
+    };
+
+    show_hook_notes(agent.run_session_end_hooks());
+    result
 }

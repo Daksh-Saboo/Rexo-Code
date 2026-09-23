@@ -411,7 +411,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "keybindings",
-        aliases: &[],
+        aliases: &["keys", "shortcuts"],
         description: "Show keyboard shortcuts for this session",
         usage: "/keybindings",
         hidden: false,
@@ -480,6 +480,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         handler: rewind_cmd,
     },
     CommandSpec {
+        name: "undo",
+        aliases: &[],
+        description: "Revert the single most recent file change (not the conversation)",
+        usage: "/undo",
+        hidden: false,
+        needs_terminal: false,
+        status: Status::Ready,
+        handler: undo_cmd,
+    },
+    CommandSpec {
         name: "resume",
         aliases: &[],
         description: "Resume a saved session, or list/save/delete saved sessions",
@@ -502,8 +512,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "mcp",
         aliases: &[],
-        description: "Manage MCP server configuration (connect/execute not wired in yet)",
-        usage: "/mcp [list|add|remove|enable|disable]",
+        description: "Manage and connect to MCP servers (stdio transport)",
+        usage: "/mcp [list|add|remove|enable|disable|connect <name>|disconnect <name>|status]",
         hidden: false,
         needs_terminal: false,
         status: Status::Ready,
@@ -512,41 +522,41 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "hooks",
         aliases: &[],
-        description: "Run custom hooks around tool calls",
-        usage: "/hooks",
+        description: "Run shell commands around tool calls and session start/end",
+        usage: "/hooks [list|add <event> \"<cmd>\" [--matcher <glob>]|remove <i>|test <event>]",
         hidden: false,
         needs_terminal: false,
-        status: Status::Planned,
+        status: Status::Ready,
         handler: hooks_cmd,
     },
     CommandSpec {
         name: "ide",
         aliases: &[],
-        description: "Manage editor/IDE integrations",
-        usage: "/ide",
+        description: "Start a local server for editor integration (no extension ships yet — see /ide info)",
+        usage: "/ide [start|stop|status|info]",
         hidden: false,
         needs_terminal: false,
-        status: Status::Planned,
+        status: Status::Ready,
         handler: ide_cmd,
     },
     CommandSpec {
         name: "plugin",
         aliases: &[],
-        description: "Manage installable REXO plugins",
-        usage: "/plugin",
+        description: "Install/enable local plugin bundles (skills + commands + hooks)",
+        usage: "/plugin [list|enable <name>|disable <name>|info]",
         hidden: false,
         needs_terminal: false,
-        status: Status::Planned,
+        status: Status::Ready,
         handler: plugin_cmd,
     },
     CommandSpec {
         name: "agents",
         aliases: &[],
-        description: "Create and manage subagents",
-        usage: "/agents",
+        description: "Define personas and run them against a task (sequential, not concurrent)",
+        usage: "/agents [list|create <name> \"<desc>\"|run <name> \"<task>\"]",
         hidden: false,
         needs_terminal: false,
-        status: Status::Planned,
+        status: Status::Ready,
         handler: agents_cmd,
     },
     CommandSpec {
@@ -637,6 +647,17 @@ fn status_cmd(session: &mut Session, _args: &[String]) -> Result<CommandOutcome>
     Ok(CommandOutcome::Continue)
 }
 
+/// `/undo` — the typed, terminal-independent equivalent of
+/// Ctrl+Shift+_. See [`crate::agent::Agent::undo_last_file_change`] for
+/// exactly what it reverts (one level, file-only).
+fn undo_cmd(session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
+    match session.agent.undo_last_file_change() {
+        Ok(msg) => println!("{} {msg}", "✓".green()),
+        Err(msg) => println!("{} {msg}", "?".yellow()),
+    }
+    Ok(CommandOutcome::Continue)
+}
+
 fn config_cmd(session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
     println!("{}", render_config(session));
     Ok(CommandOutcome::Continue)
@@ -669,7 +690,7 @@ fn render_status(session: &Session) -> String {
     let capabilities = render_capabilities(&session.agent.provider_capabilities());
 
     format!(
-        "{title}\n{rule}\nProvider:   {provider}\nModel:      {model}\nBase URL:   {base_url}\nAPI Key:    {key}\nWorkspace:  {workspace}{started_elsewhere}{saved_default}\n\nCapabilities: {capabilities}\n\nPermissions:\n  File edits:   {edit}\n  Terminal:     {terminal}\n  Git writes:   {git}\n\nAgent:\n  Max iterations: {max_iter}\n  Max tool calls: {max_calls}\n\nGlobal config: {global_dir}\n{rule}",
+        "{title}\n{rule}\nProvider:   {provider}\nModel:      {model}\nBase URL:   {base_url}\nAPI Key:    {key}\nWorkspace:  {workspace}{started_elsewhere}{saved_default}\n\nCapabilities: {capabilities}\n\nPermissions:\n  File edits:   {edit}\n  Terminal:     {terminal}\n  Git writes:   {git}\n\nAgent:\n  Max iterations: {max_iter}\n  Max tool calls: {max_calls}\n  Undo pending:   {undo}\n\nGlobal config: {global_dir}\n{rule}",
         title = "Rexo Code Status".bold(),
         rule = "─".repeat(48).dimmed(),
         provider = cfg.display_name(),
@@ -682,6 +703,7 @@ fn render_status(session: &Session) -> String {
         git = ask_or_auto(perms.allow_git_write),
         max_iter = session.agent.max_iterations(),
         max_calls = session.agent.max_tool_calls(),
+        undo = if session.agent.has_pending_undo() { "yes (/undo to revert)".to_string() } else { "no".dimmed().to_string() },
     )
 }
 
@@ -2424,6 +2446,8 @@ fn keybindings_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOu
     for (key, what) in crate::cli::tui::KEYBINDINGS {
         println!("  {:<22} {}", key.bold(), what.dimmed());
     }
+    println!();
+    println!("{}", "(In the interactive session, {?} opens the same list as a full-screen overlay.)".dimmed());
     Ok(CommandOutcome::Continue)
 }
 
@@ -2480,7 +2504,7 @@ fn loop_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
 // ---------------------------------------------------------------------
 
 fn release_notes_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    println!("{}", "Rexo Code v0.7.3".bold());
+    println!("{}", "Rexo Code v0.8.0".bold());
     println!("{}", "─".repeat(48).dimmed());
     println!("  • Fixed a real startup bug: launching rexo with no provider configured");
     println!("    used to hard-exit before the TUI ever opened, with no way to reach");
@@ -2854,25 +2878,24 @@ fn mcp_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
             } else {
                 for (name, server) in &session.config.global.mcp_servers {
                     let marker = if server.enabled { "●".green() } else { "○".dimmed() };
+                    let live = if session.agent.is_mcp_connected(name) { " (connected)".green().to_string() } else { String::new() };
                     let source = server
                         .command
                         .as_deref()
                         .map(|c| format!("command: {c}"))
                         .or_else(|| server.url.as_deref().map(|u| format!("url: {u}")))
                         .unwrap_or_else(|| "(no command or url set)".to_string());
-                    println!("{marker} {}  [{}]", name.bold(), if server.enabled { "enabled" } else { "disabled" });
+                    println!("{marker} {}{live}  [{}]", name.bold(), if server.enabled { "enabled" } else { "disabled" });
                     println!("  {}", source.dimmed());
                 }
             }
             println!();
-            println!(
-                "{}",
-                "Configuration is saved and ready, but REXO doesn't speak the MCP protocol to \
-                 these servers yet — connecting, tool discovery, and execution through the \
-                 permission engine are tracked on the roadmap. This command manages what \
-                 *will* be connected, not a live connection today."
-                    .dimmed()
-            );
+            let live = session.agent.mcp_server_names();
+            if live.is_empty() {
+                println!("{}", "None currently connected this session. Run /mcp connect <name> to connect one.".dimmed());
+            } else {
+                println!("{} {}", "Connected now:".dimmed(), live.join(", "));
+            }
         }
         Some("add") => {
             let Some(name) = args.get(1).cloned() else {
@@ -2919,7 +2942,10 @@ fn mcp_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
                 None => println!("{} No MCP server named '{name}'.", "✗".red()),
             }
         }
-        Some(other) => println!("{} Unknown /mcp subcommand '{other}'. Try: list, add, remove, enable, disable.", "✗".red()),
+        Some(sub @ ("connect" | "disconnect" | "status")) => {
+            println!("{} /mcp {sub} needs the interactive session (it does real process/network I/O).", "✗".red());
+        }
+        Some(other) => println!("{} Unknown /mcp subcommand '{other}'. Try: list, add, remove, enable, disable, connect, disconnect, status.", "✗".red()),
     }
     Ok(CommandOutcome::Continue)
 }
@@ -2929,20 +2955,210 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
     args.get(idx + 1).cloned()
 }
 
-fn hooks_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    not_yet("/hooks", "running custom hooks around tool calls")
+fn hooks_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
+    match args.first().map(String::as_str) {
+        None | Some("list") => {
+            println!("{}", "Hooks".bold());
+            println!("{}", "─".repeat(48).dimmed());
+            let hooks = session.agent.hooks();
+            if hooks.is_empty() {
+                println!("{}", "None configured yet. Add one with:".dimmed());
+                println!("  /hooks add pre_tool \"echo about to run\" --matcher \"edit_*\"");
+                println!("  /hooks add session_start \"echo session starting\"");
+            } else {
+                for (i, h) in hooks.iter().enumerate() {
+                    let matcher = h.matcher.as_deref().map(|m| format!(" [{m}]")).unwrap_or_default();
+                    println!("{} {}{matcher}  →  {}", format!("{i}.").dimmed(), h.event.bold(), h.command);
+                }
+            }
+            println!();
+            println!("{}", "Events: pre_tool, post_tool, session_start, session_end.".dimmed());
+            println!(
+                "{}",
+                "pre_tool: exit 0 allows, exit 2 blocks (stderr becomes the reason), any other \
+                 exit warns but still allows. post_tool/session_*: informational only."
+                    .dimmed()
+            );
+        }
+        Some("add") => {
+            let Some(event) = args.get(1).cloned() else {
+                println!("{} Usage: /hooks add <event> \"<command>\" [--matcher \"<glob>\"]", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            if !crate::hooks::EVENTS.contains(&event.as_str()) {
+                println!("{} Unknown event '{event}'. Try one of: {}", "✗".red(), crate::hooks::EVENTS.join(", "));
+                return Ok(CommandOutcome::Continue);
+            }
+            let Some(command) = args.get(2).cloned() else {
+                println!("{} Usage: /hooks add <event> \"<command>\" [--matcher \"<glob>\"]", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            let matcher = flag_value(&args[3.min(args.len())..], "--matcher");
+            let mut hooks = session.agent.hooks().to_vec();
+            hooks.push(crate::hooks::HookDef { event: event.clone(), command: command.clone(), matcher });
+            crate::hooks::save(session.agent.workspace(), &hooks)?;
+            session.agent.reload_hooks();
+            println!("{} Added {event} hook: {command}", "✓".green());
+        }
+        Some("remove") => {
+            let Some(idx) = args.get(1).and_then(|s| s.parse::<usize>().ok()) else {
+                println!("{} Usage: /hooks remove <index>  (see /hooks list for indices)", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            let mut hooks = session.agent.hooks().to_vec();
+            if idx >= hooks.len() {
+                println!("{} No hook at index {idx}.", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            }
+            let removed = hooks.remove(idx);
+            crate::hooks::save(session.agent.workspace(), &hooks)?;
+            session.agent.reload_hooks();
+            println!("{} Removed {} hook: {}", "✓".green(), removed.event, removed.command);
+        }
+        Some("test") => {
+            let Some(event) = args.get(1) else {
+                println!("{} Usage: /hooks test <event> [tool_name]", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            let tool_name = args.get(2).cloned();
+            let outcomes = crate::hooks::run(session.agent.hooks(), session.agent.workspace(), event, tool_name.as_deref(), None, None);
+            if outcomes.is_empty() {
+                println!("{}", "No hooks matched.".dimmed());
+            }
+            for outcome in outcomes {
+                match outcome {
+                    crate::hooks::HookOutcome::Ok(note) => println!("{} ok{}", "✓".green(), note.map(|n| format!(": {n}")).unwrap_or_default()),
+                    crate::hooks::HookOutcome::Block(reason) => println!("{} would block: {reason}", "✗".red()),
+                    crate::hooks::HookOutcome::Warn(msg) => println!("{} {msg}", "!".yellow()),
+                }
+            }
+        }
+        Some(other) => println!("{} Unknown /hooks subcommand '{other}'. Try: list, add, remove, test.", "✗".red()),
+    }
+    Ok(CommandOutcome::Continue)
 }
 
-fn ide_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    not_yet("/ide", "editor/IDE integration")
+fn ide_cmd(_session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
+    match args.first().map(String::as_str) {
+        None | Some("info") => {
+            println!("{}", "IDE Integration".bold());
+            println!("{}", "─".repeat(48).dimmed());
+            println!("/ide start   — start a local server an editor extension can connect to");
+            println!("/ide stop    — stop it");
+            println!("/ide status  — show whether it's running, its port, and the last file/selection it was told about");
+            println!();
+            println!(
+                "{}",
+                "Honest caveat: this is the REXO-side server only — no VSCode/JetBrains \
+                 extension exists yet to connect to it. The protocol (newline-delimited JSON \
+                 over a local TCP port, with a discovery lockfile under the global config dir) \
+                 is real and tested against a synthetic client; a real editor extension is a \
+                 separate project this release doesn't include."
+                    .dimmed()
+            );
+        }
+        Some("start") | Some("stop") | Some("status") => {
+            println!("{} /ide {} needs the interactive session.", "✗".red(), args[0]);
+        }
+        Some(other) => println!("{} Unknown /ide subcommand '{other}'. Try: start, stop, status, info.", "✗".red()),
+    }
+    Ok(CommandOutcome::Continue)
 }
 
-fn plugin_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    not_yet("/plugin", "installable plugin packages")
+fn plugin_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
+    match args.first().map(String::as_str) {
+        None | Some("list") => {
+            println!("{}", "Plugins".bold());
+            println!("{}", "─".repeat(48).dimmed());
+            let found = crate::plugins::discover(session.agent.workspace());
+            if found.is_empty() {
+                println!("{}", "None found. Drop one at .rexo/plugins/<name>/plugin.toml — see /plugin info for the layout.".dimmed());
+            } else {
+                for p in &found {
+                    let marker = if p.enabled { "●".green() } else { "○".dimmed() };
+                    let ver = if p.version.is_empty() { String::new() } else { format!(" v{}", p.version) };
+                    println!("{marker} {}{ver}  [{}]", p.name.bold(), if p.enabled { "enabled" } else { "disabled" });
+                    if !p.description.is_empty() {
+                        println!("  {}", p.description.dimmed());
+                    }
+                }
+            }
+        }
+        Some("enable") => {
+            let Some(name) = args.get(1) else {
+                println!("{} Usage: /plugin enable <name>", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            match crate::plugins::enable(session.agent.workspace(), name) {
+                Ok(summary) => println!("{} Enabled '{name}': {summary}.", "✓".green()),
+                Err(e) => println!("{} Couldn't enable '{name}': {e}", "✗".red()),
+            }
+        }
+        Some("disable") => {
+            let Some(name) = args.get(1) else {
+                println!("{} Usage: /plugin disable <name>", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            match crate::plugins::disable(session.agent.workspace(), name) {
+                Ok(summary) => println!("{} Disabled '{name}': {summary}.", "✓".green()),
+                Err(e) => println!("{} Couldn't disable '{name}': {e}", "✗".red()),
+            }
+        }
+        Some("info") => {
+            println!("{}", "A plugin is a folder at .rexo/plugins/<name>/ containing:".bold());
+            println!("  plugin.toml       description = \"...\", version = \"...\"");
+            println!("  skills/<n>/SKILL.md    (optional — same format as /skills)");
+            println!("  commands/<n>.md        (optional — same format as custom commands)");
+            println!("  hooks.toml              (optional — same format as .rexo/hooks.toml)");
+            println!();
+            println!("{}", "/plugin enable copies its skills/commands into the standard .rexo/ locations".dimmed());
+            println!("{}", "and merges its hooks — /plugin disable removes exactly what enable installed.".dimmed());
+        }
+        Some(other) => println!("{} Unknown /plugin subcommand '{other}'. Try: list, enable, disable, info.", "✗".red()),
+    }
+    Ok(CommandOutcome::Continue)
 }
 
-fn agents_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    not_yet("/agents", "creating and managing subagents")
+fn agents_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
+    match args.first().map(String::as_str) {
+        None | Some("list") => {
+            println!("{}", "Subagents".bold());
+            println!("{}", "─".repeat(48).dimmed());
+            let found = crate::agent::subagent::discover(session.agent.workspace());
+            if found.is_empty() {
+                println!("{}", "None yet. Create one with /agents create <name> \"<description>\".".dimmed());
+            } else {
+                for (name, persona) in &found {
+                    println!("{} {}", "●".green(), name.bold());
+                    if !persona.description.is_empty() {
+                        println!("  {}", persona.description.dimmed());
+                    }
+                }
+                println!();
+                println!("{}", "Run one with: /agents run <name> \"<task>\"".dimmed());
+            }
+        }
+        Some("create") => {
+            let Some(name) = args.get(1).cloned() else {
+                println!("{} Usage: /agents create <name> \"<description>\"", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            let description = args[2.min(args.len())..].join(" ");
+            if description.trim().is_empty() {
+                println!("{} A description helps the generated system prompt actually be useful — try: /agents create {name} \"<what it's for>\"", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            }
+            match crate::agent::subagent::create(session.agent.workspace(), &name, description.trim()) {
+                Ok(path) => println!("{} Created {} — edit its system_prompt directly if the default isn't scoped enough.", "✓".green(), path.display()),
+                Err(e) => println!("{} {e}", "✗".red()),
+            }
+        }
+        Some("run") => {
+            println!("{} /agents run needs the interactive session (it does real model calls).", "✗".red());
+        }
+        Some(other) => println!("{} Unknown /agents subcommand '{other}'. Try: list, create, run.", "✗".red()),
+    }
+    Ok(CommandOutcome::Continue)
 }
 
 // ---------------------------------------------------------------------

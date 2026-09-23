@@ -27,9 +27,10 @@
 pub mod context;
 pub mod planner;
 pub mod prompts;
+pub mod subagent;
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -39,6 +40,7 @@ use colored::Colorize;
 use crate::config::Config;
 use crate::providers::{self, parse_tool_arguments, ChatMessage, ModelCapabilities, Provider, StreamEvent, ToolCall};
 use crate::security::permissions::{Decision, PermissionKind, PermissionManager, PermissionPrompter};
+use crate::security::policies::validate_workspace_path;
 use crate::tools::{self, ToolContext, ToolPermission, ToolRegistry};
 
 // Shadows std's `println!`/`print!` within this file with capture-aware
@@ -66,6 +68,49 @@ pub struct Agent {
     tool_ctx: ToolContext,
     max_iterations: usize,
     max_tool_calls: usize,
+    /// The single most recent file change made by `edit_file`,
+    /// `create_file`, or `delete_file` this session — see
+    /// [`Agent::undo_last_file_change`]. Deliberately one level, not a
+    /// stack: this is a quick "oops, revert that" for the file the model
+    /// just touched, not the general session/workspace-checkpoint system
+    /// (still on the roadmap) that would let you rewind several edits or
+    /// survive a restart.
+    last_file_change: Option<FileChangeRecord>,
+    /// Shared with the `manage_tasks` tool this same list was registered
+    /// with at construction — see [`Agent::tasks`] for how the TUI's
+    /// Ctrl+T panel reads it.
+    tasks: Arc<Mutex<tools::tasks::TaskList>>,
+    /// Loaded once at construction from `.rexo/hooks.toml` — `/hooks
+    /// add`/`remove` update both this and the file together, so this
+    /// never drifts from what's on disk mid-session.
+    hooks: Vec<crate::hooks::HookDef>,
+    /// Live MCP connections, keyed by server name — populated by
+    /// `/mcp connect` (and auto-connected `enabled` servers at
+    /// startup), never by direct construction. Each connected server's
+    /// discovered tools are already registered into `registry` by the
+    /// time they land here; this map exists so `/mcp status`/`disconnect`
+    /// have something to report on and act on afterward.
+    mcp_clients: std::collections::HashMap<String, crate::mcp::McpClient>,
+    /// The running `/ide` server, if `/ide start` has been run this
+    /// session — see [`Agent::start_ide`]/[`Agent::stop_ide`].
+    ide_server: Option<crate::ide::IdeServer>,
+}
+
+/// What a file looked like immediately before a mutating tool call, so
+/// [`Agent::undo_last_file_change`] can put it back.
+#[derive(Debug, Clone)]
+enum PriorFileContent {
+    Existed(String),
+    DidNotExist,
+}
+
+#[derive(Debug, Clone)]
+struct FileChangeRecord {
+    /// Resolved, validated path on disk.
+    resolved: PathBuf,
+    /// As the model gave it, for user-facing messages.
+    display_path: String,
+    prior: PriorFileContent,
 }
 
 impl Agent {
@@ -400,7 +445,12 @@ impl Agent {
             }
         }
 
-        match tool.execute(&self.tool_ctx, args).await {
+        if let Err(reason) = self.run_pre_tool_hooks(&call.name, &args) {
+            print_result_line(&format!("blocked by hook: {reason}"), true);
+            return format!("Blocked by a pre_tool hook: {reason}");
+        }
+
+        let result = match tool.execute(&self.tool_ctx, args.clone()).await {
             Ok(output) => {
                 print_tool_result(&call.name, &output);
                 output
@@ -409,7 +459,9 @@ impl Agent {
                 print_result_line(&format!("error: {e}"), true);
                 format!("Error: {e}")
             }
-        }
+        };
+        self.run_post_tool_hooks(&call.name, &args, &result);
+        result
     }
 
     // ---- TUI counterparts -------------------------------------------
@@ -428,16 +480,22 @@ impl Agent {
     /// practice, a `cli::tui::TuiCore`) instead of directly to stdout, and
     /// permission prompts are a redraw-safe modal instead of a blocking
     /// `stdin` read that doesn't work while the terminal's in raw mode.
+    /// `images` is almost always empty — only non-empty when Alt+V has
+    /// pasted something onto `ui.pending_images` since the last message
+    /// (see the `KeyCode::Char('v')` (Alt) handler in `read_input`, and
+    /// `run_turn`/`run_aside`, which both drain that slot right before
+    /// calling this).
     pub async fn respond_tui<U>(
         &mut self,
         history: &mut Vec<ChatMessage>,
         user_message: &str,
+        images: Vec<crate::providers::ImageAttachment>,
         ui: &mut U,
     ) -> Result<String>
     where
         U: AgentUi + PermissionPrompter,
     {
-        history.push(ChatMessage::user(user_message));
+        history.push(ChatMessage::user_with_images(user_message, images));
         self.agent_loop_tui(history, ui).await
     }
 
@@ -603,7 +661,16 @@ impl Agent {
             }
         }
 
-        let outcome = match tool.execute(&self.tool_ctx, args).await {
+        if let Err(reason) = self.run_pre_tool_hooks(&call.name, &args) {
+            ui.tool_result_line(&format!("blocked by hook: {reason}"), true);
+            ui.redraw();
+            return format!("Blocked by a pre_tool hook: {reason}");
+        }
+
+        let mutating = matches!(call.name.as_str(), "edit_file" | "create_file" | "delete_file");
+        let pre_snapshot = if mutating { self.snapshot_before_mutation(&args) } else { None };
+
+        let outcome = match tool.execute(&self.tool_ctx, args.clone()).await {
             Ok(output) => {
                 apply_tool_result_tui(ui, &call.name, &output);
                 output
@@ -613,8 +680,232 @@ impl Agent {
                 format!("Error: {e}")
             }
         };
+        if let Some((resolved, display_path, prior)) = pre_snapshot {
+            self.record_if_changed(resolved, display_path, prior);
+        }
+        self.run_post_tool_hooks(&call.name, &args, &outcome);
         ui.redraw();
         outcome
+    }
+
+    /// Read a mutating tool call's target file *before* it runs, so
+    /// [`Self::record_if_changed`] has something to compare against
+    /// afterward. Returns `None` (silently skipping the undo record —
+    /// not the tool call itself) when the path is missing/invalid, or
+    /// when an existing file can't be read as UTF-8 text: this undo
+    /// slot only ever holds text it can faithfully restore, never a
+    /// best-effort/binary-unsafe guess.
+    fn snapshot_before_mutation(&self, args: &serde_json::Value) -> Option<(PathBuf, String, PriorFileContent)> {
+        let display_path = args.get("path").and_then(serde_json::Value::as_str)?.to_string();
+        let resolved = validate_workspace_path(&self.tool_ctx.workspace, &display_path).ok()?;
+        let prior = if resolved.exists() {
+            match std::fs::read_to_string(&resolved) {
+                Ok(text) => PriorFileContent::Existed(text),
+                Err(_) => return None, // binary or otherwise unreadable as text — don't track it
+            }
+        } else {
+            PriorFileContent::DidNotExist
+        };
+        Some((resolved, display_path, prior))
+    }
+
+    /// Compare a mutating tool call's target file against the snapshot
+    /// [`Self::snapshot_before_mutation`] took, and record it as the new
+    /// undo slot only if the file actually changed. `edit_file` and
+    /// `create_file` fail "softly" (an `Ok(String)` explaining why,
+    /// rather than an `Err`) when the model's call doesn't make sense —
+    /// comparing before/after filesystem state directly, rather than
+    /// trying to parse those messages, means a failed call never
+    /// clobbers a real earlier change still waiting to be undone.
+    fn record_if_changed(&mut self, resolved: PathBuf, display_path: String, prior: PriorFileContent) {
+        let changed = match &prior {
+            PriorFileContent::Existed(old) => !resolved.exists() || std::fs::read_to_string(&resolved).map(|new| &new != old).unwrap_or(false),
+            PriorFileContent::DidNotExist => resolved.exists(),
+        };
+        if changed {
+            self.last_file_change = Some(FileChangeRecord { resolved, display_path, prior });
+        }
+    }
+
+    /// Ctrl+Shift+_ (and `/undo`): revert the single most recent file
+    /// change this session — the last successful `edit_file`,
+    /// `create_file`, or `delete_file` call. One level only, and
+    /// conversation-independent (mirrors `/rewind` being file-
+    /// independent the other way around): this is a quick "put that
+    /// back," not the general workspace-checkpoint/session-snapshot
+    /// system still on the roadmap.
+    pub fn undo_last_file_change(&mut self) -> std::result::Result<String, String> {
+        let Some(change) = self.last_file_change.take() else {
+            return Err("Nothing to undo — no file change recorded yet this session.".to_string());
+        };
+        match change.prior {
+            PriorFileContent::Existed(old) => {
+                std::fs::write(&change.resolved, old).map_err(|e| format!("Undo failed: couldn't restore {}: {e}", change.display_path))?;
+                Ok(format!("Reverted {} to its previous content.", change.display_path))
+            }
+            PriorFileContent::DidNotExist => {
+                std::fs::remove_file(&change.resolved).map_err(|e| format!("Undo failed: couldn't remove {}: {e}", change.display_path))?;
+                Ok(format!("Removed {} (undoing its creation).", change.display_path))
+            }
+        }
+    }
+
+    /// Whether there's currently a file change `/undo`/Ctrl+Shift+_
+    /// would act on — used by `/status` and the undo key handler's
+    /// nothing-to-do case.
+    pub fn has_pending_undo(&self) -> bool {
+        self.last_file_change.is_some()
+    }
+
+    /// A clone of the shared handle the `manage_tasks` tool writes
+    /// through — the TUI's Ctrl+T panel reads the same live state the
+    /// model sees and edits, not a snapshot that can drift from it.
+    pub fn tasks(&self) -> Arc<Mutex<tools::tasks::TaskList>> {
+        self.tasks.clone()
+    }
+
+    pub fn hooks(&self) -> &[crate::hooks::HookDef] {
+        &self.hooks
+    }
+
+    /// Actually connect to an MCP server — spawn it, complete the MCP
+    /// handshake, discover its tools, and register each one into this
+    /// agent's tool registry as `mcp__<name>__<tool>` (see
+    /// [`crate::tools::mcp_proxy::McpProxyTool`]). Returns the number of
+    /// tools registered. Connecting to a name that's already connected
+    /// replaces the old connection (its tools stay registered under the
+    /// same names, now backed by the new connection).
+    pub async fn connect_mcp_server(&mut self, name: &str, command: &str) -> Result<usize> {
+        let client = crate::mcp::McpClient::connect(name, command).await?;
+        let tools = client.list_tools().await?;
+        let count = tools.len();
+        for info in tools {
+            self.registry.register(Arc::new(tools::mcp_proxy::McpProxyTool::new(client.clone(), name, info)));
+        }
+        self.mcp_clients.insert(name.to_string(), client);
+        Ok(count)
+    }
+
+    pub fn mcp_server_names(&self) -> Vec<String> {
+        self.mcp_clients.keys().cloned().collect()
+    }
+
+    pub fn is_mcp_connected(&self, name: &str) -> bool {
+        self.mcp_clients.contains_key(name)
+    }
+
+    /// Removes the connection from tracking *and* kills the child
+    /// process directly — relying on `kill_on_drop` alone wouldn't be
+    /// enough here, since every already-registered proxy tool for this
+    /// server holds its own clone of the same `McpClient` (and so the
+    /// same `Arc<Mutex<Child>>`), which would otherwise keep the process
+    /// alive for the rest of the session. Those proxy tools stay
+    /// registered — calling one after this just gets a connection-closed
+    /// error back from `McpClient::call_tool` rather than disappearing
+    /// from the model's tool list mid-conversation.
+    pub fn disconnect_mcp_server(&mut self, name: &str) -> bool {
+        let Some(client) = self.mcp_clients.remove(name) else {
+            return false;
+        };
+        if let Ok(mut child) = client.child_handle().try_lock() {
+            let _ = child.start_kill();
+        }
+        true
+    }
+
+    /// `/ide start` — see `crate::ide` for the protocol and what this
+    /// server does and doesn't do (no real editor extension exists yet
+    /// to connect to it; this is the honestly-tested REXO-side half).
+    pub async fn start_ide(&mut self) -> Result<u16> {
+        if let Some(existing) = &self.ide_server {
+            return Ok(existing.port);
+        }
+        let server = crate::ide::start(&self.tool_ctx.workspace).await?;
+        let port = server.port;
+        self.ide_server = Some(server);
+        Ok(port)
+    }
+
+    pub fn stop_ide(&mut self) -> bool {
+        match self.ide_server.take() {
+            Some(server) => {
+                crate::ide::stop(server);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn ide_status(&self) -> Option<(u16, crate::ide::IdeContext)> {
+        self.ide_server.as_ref().map(|s| (s.port, s.current_context()))
+    }
+
+    /// `/hooks add`/`remove` write straight to `.rexo/hooks.toml`
+    /// themselves (via `crate::hooks::save`) — this just re-reads it
+    /// back so this session's in-memory copy matches immediately,
+    /// rather than only taking effect on the next launch.
+    pub fn reload_hooks(&mut self) {
+        self.hooks = crate::hooks::load(&self.tool_ctx.workspace);
+    }
+
+    /// `pre_tool`/`post_tool` around one tool call. Returns `Err(reason)`
+    /// when a hook exit-2-blocked it — the caller should skip the tool
+    /// call entirely and surface `reason` the same way a denied
+    /// permission is surfaced. Any `Warn` outcomes are printed directly
+    /// (both call sites already have a `println!`-based note mechanism
+    /// in scope) rather than threaded back through the return value —
+    /// they never change control flow, only what's visible.
+    fn run_pre_tool_hooks(&self, tool_name: &str, args: &serde_json::Value) -> std::result::Result<(), String> {
+        for outcome in crate::hooks::run(&self.hooks, &self.tool_ctx.workspace, "pre_tool", Some(tool_name), Some(args), None) {
+            match outcome {
+                crate::hooks::HookOutcome::Block(reason) => return Err(reason),
+                crate::hooks::HookOutcome::Warn(msg) => println!("{} {msg}", "!".yellow()),
+                crate::hooks::HookOutcome::Ok(Some(note)) => println!("{} {note}", "hook:".dimmed()),
+                crate::hooks::HookOutcome::Ok(None) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn run_post_tool_hooks(&self, tool_name: &str, args: &serde_json::Value, output: &str) {
+        for outcome in crate::hooks::run(&self.hooks, &self.tool_ctx.workspace, "post_tool", Some(tool_name), Some(args), Some(output)) {
+            match outcome {
+                crate::hooks::HookOutcome::Block(_) => {} // post_tool never blocks — see module docs
+                crate::hooks::HookOutcome::Warn(msg) => println!("{} {msg}", "!".yellow()),
+                crate::hooks::HookOutcome::Ok(Some(note)) => println!("{} {note}", "hook:".dimmed()),
+                crate::hooks::HookOutcome::Ok(None) => {}
+            }
+        }
+    }
+
+    /// Run once, right after the TUI opens (or right before a headless
+    /// single-shot run starts). No matcher, informational only — stdout
+    /// is returned so the TUI can show it as a `note` (its own display
+    /// mechanism) instead of this going through the `println!`-based
+    /// macro that assumes a plain scrolling terminal.
+    pub fn run_session_start_hooks(&self) -> Vec<String> {
+        crate::hooks::run(&self.hooks, &self.tool_ctx.workspace, "session_start", None, None, None)
+            .into_iter()
+            .filter_map(|o| match o {
+                crate::hooks::HookOutcome::Ok(Some(note)) => Some(note),
+                crate::hooks::HookOutcome::Warn(msg) => Some(format!("(hook warning) {msg}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Same as [`Self::run_session_start_hooks`], for `session_end` —
+    /// run right before the TUI exits / right after a headless
+    /// single-shot run finishes.
+    pub fn run_session_end_hooks(&self) -> Vec<String> {
+        crate::hooks::run(&self.hooks, &self.tool_ctx.workspace, "session_end", None, None, None)
+            .into_iter()
+            .filter_map(|o| match o {
+                crate::hooks::HookOutcome::Ok(Some(note)) => Some(note),
+                crate::hooks::HookOutcome::Warn(msg) => Some(format!("(hook warning) {msg}")),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -814,7 +1105,9 @@ fn print_result_block(output: &str) {
 /// effective-visibility cycle (E0391) on this exact toolchain — a
 /// top-level function sidesteps it entirely and is just as clear to call.
 fn assemble_agent(config: &Config, provider: Box<dyn Provider>, non_interactive: bool, auto_approve: bool) -> (Agent, Vec<ChatMessage>) {
-    let registry = tools::default_registry();
+    let mut registry = tools::default_registry();
+    let tasks = Arc::new(Mutex::new(tools::tasks::TaskList::default()));
+    registry.register(Arc::new(tools::tasks::ManageTasksTool::new(tasks.clone())));
     let permissions = PermissionManager::new(config.permissions.clone(), non_interactive, auto_approve);
     let tool_ctx = ToolContext {
         workspace: config.workspace.clone(),
@@ -828,6 +1121,11 @@ fn assemble_agent(config: &Config, provider: Box<dyn Provider>, non_interactive:
         tool_ctx,
         max_iterations: config.agent.max_iterations.max(1),
         max_tool_calls: config.agent.max_tool_calls.max(1),
+        last_file_change: None,
+        tasks,
+        hooks: crate::hooks::load(&config.workspace),
+        mcp_clients: std::collections::HashMap::new(),
+        ide_server: None,
     };
 
     let history = vec![ChatMessage::system(system_prompt(&config.workspace))];

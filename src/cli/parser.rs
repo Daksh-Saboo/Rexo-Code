@@ -16,6 +16,11 @@ pub enum ParsedLine {
     /// handled directly in `cli::tui::run_inner` the same way `exit` and
     /// `{?}` are, rather than represented here.
     Shell(String),
+    /// `btw <question>` — a quick side question, answered with full
+    /// context but not kept in it (see `cli::tui::run_aside`). Only the
+    /// `btw <text>` form is special; a bare `btw` with nothing after it
+    /// falls through to `Prompt` like any other short message would.
+    Aside(String),
     /// Anything else — sent to the model as-is (untouched, not tokenized).
     Prompt(String),
 }
@@ -88,6 +93,20 @@ pub fn parse_line(input: &str) -> ParsedLine {
         let rest = rest.trim();
         if !rest.is_empty() {
             return ParsedLine::Shell(rest.to_string());
+        }
+    }
+
+    // `btw <question>` — recognized as a whole leading word (`btw`,
+    // `btw:`, `btw,`) followed by real content, so "between you and me…"
+    // or a message that just happens to start with those three letters
+    // isn't misread as an aside.
+    let lower = trimmed.to_lowercase();
+    for sep in ["btw ", "btw:", "btw,"] {
+        if lower.starts_with(sep) {
+            let rest = trimmed[sep.len()..].trim();
+            if !rest.is_empty() {
+                return ParsedLine::Aside(rest.to_string());
+            }
         }
     }
 
@@ -242,5 +261,28 @@ mod tests {
         // "exit"/"{?}"). In isolation, the parser itself just falls
         // through to treating it as ordinary (empty-ish) prompt text.
         assert_eq!(parse_line("!"), ParsedLine::Prompt("!".to_string()));
+    }
+
+    #[test]
+    fn btw_prefix_is_an_aside() {
+        assert_eq!(
+            parse_line("btw what does this repo use for linting"),
+            ParsedLine::Aside("what does this repo use for linting".to_string())
+        );
+        assert_eq!(parse_line("BTW is this file tracked?"), ParsedLine::Aside("is this file tracked?".to_string()));
+        assert_eq!(parse_line("btw: quick one"), ParsedLine::Aside("quick one".to_string()));
+        assert_eq!(parse_line("btw, another"), ParsedLine::Aside("another".to_string()));
+    }
+
+    #[test]
+    fn btw_without_a_following_question_is_not_an_aside() {
+        // Bare "btw" (nothing after it) and words that merely start with
+        // "btw" without the whitespace/`:`/`,` separator both fall
+        // through to a normal prompt.
+        assert_eq!(parse_line("btw"), ParsedLine::Prompt("btw".to_string()));
+        assert_eq!(
+            parse_line("btwixt and between"),
+            ParsedLine::Prompt("btwixt and between".to_string())
+        );
     }
 }

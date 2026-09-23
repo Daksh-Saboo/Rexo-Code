@@ -11,6 +11,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::tools::ToolDefinition;
 
@@ -360,7 +361,7 @@ struct WireRequest<'a> {
 struct WireMessage {
     role: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<Value>,
     // Kimi K3 (and similar always-reasoning models) expect prior turns'
     // reasoning to be echoed back for correct multi-turn behavior; harmless
     // to omit for providers that don't use it.
@@ -397,9 +398,32 @@ impl From<&ChatMessage> for WireMessage {
             Role::Tool => "tool",
         };
 
+        // Plain string content — the overwhelming majority of messages —
+        // unless there are images attached, in which case the OpenAI
+        // vision wire format wants `content` to be an array mixing a
+        // `{"type":"text",...}` part with one `{"type":"image_url",...}`
+        // part per image, each a `data:` URL. See `ImageAttachment`'s
+        // docs for why the bytes are already base64 PNG by this point.
+        let content = if msg.images.is_empty() {
+            msg.content.clone().map(Value::String)
+        } else {
+            let mut parts: Vec<Value> = Vec::with_capacity(1 + msg.images.len());
+            let text = msg.content.clone().unwrap_or_default();
+            if !text.is_empty() {
+                parts.push(serde_json::json!({"type": "text", "text": text}));
+            }
+            for img in &msg.images {
+                parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:{};base64,{}", img.mime, img.base64_data) }
+                }));
+            }
+            Some(Value::Array(parts))
+        };
+
         WireMessage {
             role,
-            content: msg.content.clone(),
+            content,
             reasoning_content: msg.reasoning.clone(),
             tool_calls: msg
                 .tool_calls
@@ -465,6 +489,7 @@ struct StreamFunctionDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ImageAttachment;
 
     fn empty_client() -> OpenAiProtocolClient {
         OpenAiProtocolClient::new(
@@ -563,5 +588,39 @@ mod tests {
         let msg = ChatMessage::system("hi");
         let wire = WireMessage::from(&msg);
         assert_eq!(wire.role, "system");
+    }
+
+    #[test]
+    fn text_only_message_serializes_content_as_a_plain_string() {
+        let msg = ChatMessage::user("hello");
+        let wire = WireMessage::from(&msg);
+        let json = serde_json::to_value(&wire).unwrap();
+        assert_eq!(json["content"], serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn message_with_images_serializes_content_as_text_and_image_url_parts() {
+        let msg = ChatMessage::user_with_images(
+            "what's in this?",
+            vec![ImageAttachment { mime: "image/png".to_string(), base64_data: "QUJD".to_string() }],
+        );
+        let wire = WireMessage::from(&msg);
+        let json = serde_json::to_value(&wire).unwrap();
+        let parts = json["content"].as_array().expect("content should be an array when images are attached");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "what's in this?");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,QUJD");
+    }
+
+    #[test]
+    fn image_only_message_omits_the_empty_text_part() {
+        let msg = ChatMessage::user_with_images("", vec![ImageAttachment { mime: "image/png".to_string(), base64_data: "AAAA".to_string() }]);
+        let wire = WireMessage::from(&msg);
+        let json = serde_json::to_value(&wire).unwrap();
+        let parts = json["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "image_url");
     }
 }

@@ -97,15 +97,23 @@ const SPINNER_FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '�
 /// does.
 pub(crate) const KEYBINDINGS: &[(&str, &str)] = &[
     ("Enter", "Send your message / run a command"),
+    ("\\ + Enter", "Insert a literal newline instead of sending — keep typing on the next line"),
     ("Up / Down", "Browse command history (or move an autocomplete/help selection)"),
     ("Tab", "Accept the highlighted slash-command suggestion"),
     ("@", "Reference a file — opens a searchable picker"),
     ("!", "Toggle shell mode (every line runs in PowerShell/sh, not the model) — or !<cmd> for one command"),
+    ("btw <question>", "Ask a quick side question — answered with full context, but not kept in it"),
     ("?", "Show shortcuts (as the very first character), or {?} anytime"),
-    ("Alt+M", "Quick-switch model (same arrow-key picker as /model)"),
-    ("Alt+P", "Quick-switch provider (same arrow-key picker as /provider)"),
+    ("Alt+M / Alt+P", "Quick-switch model (same arrow-key picker as /model)"),
+    ("Alt+V", "Paste a clipboard image — attached to your next message for a vision-capable model"),
+    ("Shift+Tab", "Toggle auto-accept edits (same switch as /permissions edit always|ask)"),
+    ("Ctrl+Shift+_", "Undo the single most recent file change (same as /undo)"),
+    ("Ctrl+G", "Edit the current input in $EDITOR"),
+    ("Ctrl+S", "Stash the current prompt, or restore the last one stashed"),
+    ("Ctrl+O", "Toggle verbose turn-level diagnostics (elapsed time, context size)"),
+    ("Ctrl+T", "Toggle the task-list panel (tasks the model tracks with the manage_tasks tool)"),
     ("Ctrl+Y", "Toggle selection mode — release the mouse so your terminal's own select & copy works"),
-    ("Esc", "Close a popup (help, autocomplete, permission prompt) / clear the input line"),
+    ("Esc", "Close a popup (help, autocomplete, permission prompt) / press twice to clear the input line"),
     ("Ctrl+C", "Cancel the current turn, or clear/exit at an idle prompt (press twice)"),
     ("Ctrl+L", "Redraw the screen"),
     ("PageUp / PageDown", "Scroll the conversation by a page"),
@@ -217,10 +225,28 @@ pub(crate) struct UiState {
     autocomplete_cache: Vec<String>,
     autocomplete_selected: usize,
     last_ctrl_c: Option<Instant>,
+    /// Mirrors `last_ctrl_c`'s double-press pattern for Esc — see the
+    /// `KeyCode::Esc` arm in `read_input`.
+    last_esc: Option<Instant>,
+    /// A single scratch slot for Ctrl+S ("stash this prompt, I'll come
+    /// back to it") — see the `KeyCode::Char('s')` arm in `read_input`.
+    stashed_input: Option<String>,
+    /// Alt+V-pasted images waiting to go out with the next message —
+    /// see the `KeyCode::Char('v')` (Alt) arm in `read_input` and
+    /// `run_turn`/`run_aside`, which both drain this via `take`.
+    pending_images: Vec<crate::providers::ImageAttachment>,
 
     header: HeaderInfo,
     focus_mode: bool,
     shell_mode: bool,
+    /// Mirrors `session.ui.tasks_visible` — see `sync_header`.
+    tasks_visible: bool,
+    /// A snapshot of `Agent::tasks()`'s contents, refreshed every
+    /// `sync_header` call — cheap to clone (a handful of short structs at
+    /// most) and lets `render::draw` stay a plain `&UiState` reader like
+    /// everything else it draws, rather than needing its own lock on the
+    /// live `Arc<Mutex<TaskList>>`.
+    tasks_snapshot: Vec<crate::tools::tasks::TaskItem>,
     scroll_step: u16,
     suggestion: &'static str,
 
@@ -302,9 +328,14 @@ impl TuiCore {
                 autocomplete_cache: Vec::new(),
                 autocomplete_selected: 0,
                 last_ctrl_c: None,
+                last_esc: None,
+                stashed_input: None,
+                pending_images: Vec::new(),
                 header,
                 focus_mode: session.ui.focus_mode,
                 shell_mode: session.ui.shell_mode,
+                tasks_visible: session.ui.tasks_visible,
+                tasks_snapshot: Vec::new(),
                 scroll_step: session.ui.scroll_step.max(1),
                 suggestion: pick_suggestion(),
                 help: None,
@@ -328,6 +359,10 @@ impl TuiCore {
         self.header.sync(session);
         self.focus_mode = session.ui.focus_mode;
         self.shell_mode = session.ui.shell_mode;
+        self.tasks_visible = session.ui.tasks_visible;
+        if self.tasks_visible {
+            self.tasks_snapshot = session.agent.tasks().lock().map(|t| t.items().to_vec()).unwrap_or_default();
+        }
         self.scroll_step = session.ui.scroll_step.max(1);
         set_console_title(session);
     }
@@ -403,6 +438,74 @@ impl TuiCore {
         // phase below — one keypress skips the *whole* intro straight to
         // its fully-assembled final frame, not just the current phase.
         let mut skip = false;
+
+        // --- Phase 0: a quick boot-sequence log ------------------------
+        // Fits the project's own Tron-Code lineage — REXO_NO_INTRO still
+        // skips this along with everything else. Short on purpose: this
+        // is a flourish before the real animation, not a second one.
+        const BOOT_LINES: &[&str] = &["REXO CORE...", "loading providers...", "loading tools...", "security online."];
+        const BOOT_LINE_TIME: Duration = Duration::from_millis(140);
+        let boot_x = 2u16;
+        let boot_y_start = 1u16;
+        for (i, _line) in BOOT_LINES.iter().enumerate() {
+            if skip {
+                break;
+            }
+            self.terminal.draw(|f| {
+                let draw_area = f.size();
+                let buf = f.buffer_mut();
+                let style = ratatui::style::Style::default().fg(Color::DarkGray);
+                for (row, l) in BOOT_LINES.iter().take(i + 1).enumerate() {
+                    let y = boot_y_start + row as u16;
+                    if y >= draw_area.height {
+                        continue;
+                    }
+                    for (col, ch) in l.chars().enumerate() {
+                        let x = boot_x + col as u16;
+                        if x < draw_area.width {
+                            buf.get_mut(x, y).set_char(ch).set_style(style);
+                        }
+                    }
+                }
+            })?;
+            tokio::select! {
+                _ = tokio::time::sleep(BOOT_LINE_TIME) => {}
+                event = self.events.next() => {
+                    if let Some(Ok(Event::Key(k))) = event {
+                        if k.kind == KeyEventKind::Press {
+                            skip = true;
+                        }
+                    }
+                }
+            }
+        }
+        // Brief hold so the last line is actually readable, then clear —
+        // the boot log doesn't linger once the real animation starts.
+        if !skip {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(220)) => {}
+                event = self.events.next() => {
+                    if let Some(Ok(Event::Key(k))) = event {
+                        if k.kind == KeyEventKind::Press {
+                            skip = true;
+                        }
+                    }
+                }
+            }
+        }
+        self.terminal.draw(|f| {
+            let draw_area = f.size();
+            let buf = f.buffer_mut();
+            for row in 0..BOOT_LINES.len() as u16 {
+                let y = boot_y_start + row;
+                if y >= draw_area.height {
+                    continue;
+                }
+                for x in 0..draw_area.width {
+                    buf.get_mut(x, y).set_char(' ');
+                }
+            }
+        })?;
 
         // --- Phase 1: three scan-lines sweeping at once ---------------
         // Top sweeps left→right, bottom sweeps right→left (both ~1.7s),
@@ -506,8 +609,13 @@ impl TuiCore {
         // --- Phase 2: the face scatters in and converges ---------------
         // Slower and with more frames than the original cut of this
         // animation — meant to read as a deliberate arrival, not a blip.
+        // Each character also leaves a one-frame dim "ghost" behind its
+        // previous position — a comet-trail effect that reads as motion
+        // rather than characters just teleporting frame to frame.
         const FRAMES: u32 = 40;
         const FRAME_TIME: Duration = Duration::from_millis(32); // ~1.3s for the full phase
+
+        let mut prev_positions: Vec<Option<(u16, u16)>> = vec![None; targets.len()];
 
         for frame_i in 0..=FRAMES {
             if skip {
@@ -515,6 +623,8 @@ impl TuiCore {
             }
             let t = frame_i as f32 / FRAMES as f32;
             let eased = 1.0 - (1.0 - t).powi(3); // ease-out cubic: fast start, settles gently into place
+
+            let mut current_positions: Vec<Option<(u16, u16)>> = vec![None; targets.len()];
 
             self.terminal.draw(|f| {
                 let draw_area = f.size();
@@ -529,6 +639,7 @@ impl TuiCore {
                     }
                 }
                 let style = ratatui::style::Style::default().fg(accent);
+                let trail_style = ratatui::style::Style::default().fg(Color::DarkGray);
                 for (i, (tx, ty, ch)) in targets.iter().enumerate() {
                     let (sx, sy) = starts[i];
                     let cx = (sx + (*tx as f32 - sx) * eased).round();
@@ -537,11 +648,21 @@ impl TuiCore {
                         continue;
                     }
                     let (cx, cy) = (cx as u16, cy as u16);
+                    // Ghost first, so the sharp current-frame glyph drawn
+                    // right after always wins if the two happen to land
+                    // on the same cell.
+                    if let Some((px, py)) = prev_positions[i] {
+                        if (px, py) != (cx, cy) && px < draw_area.width && py < draw_area.height {
+                            buf.get_mut(px, py).set_char(*ch).set_style(trail_style);
+                        }
+                    }
                     if cx < draw_area.width && cy < draw_area.height {
                         buf.get_mut(cx, cy).set_char(*ch).set_style(style);
+                        current_positions[i] = Some((cx, cy));
                     }
                 }
             })?;
+            prev_positions = current_positions;
 
             tokio::select! {
                 _ = tokio::time::sleep(FRAME_TIME) => {}
@@ -578,6 +699,57 @@ impl TuiCore {
                 _ = tokio::time::sleep(Duration::from_millis(700)) => {}
                 _ = self.events.next() => {}
             }
+        }
+
+        // --- Phase 4: a quick power-on pulse ----------------------------
+        // Two brightness flashes on the assembled face/title before it
+        // settles into its steady accent color — reads as "power just
+        // came on," not just a static frame appearing.
+        if !skip {
+            const PULSES: usize = 2;
+            const PULSE_HALF: Duration = Duration::from_millis(90);
+            for _ in 0..PULSES {
+                if skip {
+                    break;
+                }
+                for pulse_color in [Color::White, accent] {
+                    if skip {
+                        break;
+                    }
+                    self.terminal.draw(|f| {
+                        let draw_area = f.size();
+                        let buf = f.buffer_mut();
+                        let style = ratatui::style::Style::default().fg(pulse_color);
+                        for (tx, ty, ch) in &targets {
+                            if *tx < draw_area.width && *ty < draw_area.height {
+                                buf.get_mut(*tx, *ty).set_char(*ch).set_style(style);
+                            }
+                        }
+                    })?;
+                    tokio::select! {
+                        _ = tokio::time::sleep(PULSE_HALF) => {}
+                        event = self.events.next() => {
+                            if let Some(Ok(Event::Key(k))) = event {
+                                if k.kind == KeyEventKind::Press {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Land firmly on the steady accent color regardless of which
+            // pulse color the loop above happened to end on.
+            self.terminal.draw(|f| {
+                let draw_area = f.size();
+                let buf = f.buffer_mut();
+                let style = ratatui::style::Style::default().fg(accent);
+                for (tx, ty, ch) in &targets {
+                    if *tx < draw_area.width && *ty < draw_area.height {
+                        buf.get_mut(*tx, *ty).set_char(*ch).set_style(style);
+                    }
+                }
+            })?;
         }
 
         Ok(())
@@ -1041,6 +1213,9 @@ async fn run_inner(session: &mut Session, show_intro: bool) -> Result<()> {
     if session.agent.provider_description().starts_with("(not active:") {
         ui.note("No provider is configured yet — run /connect to pick one.", NoteLevel::Warning);
     }
+    for note in session.agent.run_session_start_hooks() {
+        ui.note(&note, NoteLevel::Info);
+    }
     ui.draw()?;
 
     loop {
@@ -1065,6 +1240,14 @@ async fn run_inner(session: &mut Session, show_intro: bool) -> Result<()> {
             break; // Ctrl+C-Ctrl+C or /exit
         };
         if line.trim().is_empty() {
+            // Still worth sending if Alt+V left an image queued up — a
+            // caption-less "just look at this" is a normal thing to
+            // send, not an empty submit to silently drop.
+            if !ui.pending_images.is_empty() {
+                if !run_turn(&mut ui, session, "").await? {
+                    break;
+                }
+            }
             continue;
         }
         ui.history.push(line.clone());
@@ -1115,6 +1298,11 @@ async fn run_inner(session: &mut Session, show_intro: bool) -> Result<()> {
             ParsedLine::Shell(command) => {
                 run_shell_command(&mut ui, session, &command).await;
             }
+            ParsedLine::Aside(text) => {
+                if !run_aside(&mut ui, session, &text).await? {
+                    break;
+                }
+            }
             ParsedLine::Prompt(text) if session.ui.shell_mode => {
                 run_shell_command(&mut ui, session, &text).await;
             }
@@ -1127,6 +1315,10 @@ async fn run_inner(session: &mut Session, show_intro: bool) -> Result<()> {
         maybe_autocompact(&mut ui, session);
     }
 
+    for note in session.agent.run_session_end_hooks() {
+        ui.note(&note, NoteLevel::Info);
+    }
+    ui.draw().ok();
     Ok(())
 }
 
@@ -1161,7 +1353,12 @@ async fn run_shell_command(ui: &mut TuiCore, session: &mut Session, command: &st
 /// shapes).
 async fn run_turn(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result<bool> {
     ui.sync_header(session);
-    ui.push_user_prompt(text);
+    let display_text = if text.trim().is_empty() && !ui.pending_images.is_empty() {
+        "[image attached, no caption]"
+    } else {
+        text
+    };
+    ui.push_user_prompt(display_text);
     ui.draw()?;
 
     let skills = crate::cli::skills::discover(session.agent.workspace());
@@ -1184,8 +1381,21 @@ async fn run_turn(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result
         ui.draw()?;
     }
 
-    match session.agent.respond_tui(&mut session.history, &augmented, ui).await {
-        Ok(_answer) => {}
+    let started = Instant::now();
+    let images = std::mem::take(&mut ui.pending_images);
+    match session.agent.respond_tui(&mut session.history, &augmented, images, ui).await {
+        Ok(_answer) => {
+            if session.ui.verbose {
+                ui.note(
+                    &format!(
+                        "[verbose] turn finished in {:.1}s · {} messages in context",
+                        started.elapsed().as_secs_f32(),
+                        session.history.len()
+                    ),
+                    NoteLevel::Info,
+                );
+            }
+        }
         Err(e) => {
             let kind = crate::providers::provider_error_kind(&e);
             let suffix = if kind == crate::providers::ProviderErrorKind::Unknown {
@@ -1207,6 +1417,36 @@ async fn run_turn(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result
     Ok(true)
 }
 
+/// `btw <question>` — answered with the same full context a real turn
+/// gets (so it can actually see the codebase/conversation so far), but
+/// rolled back out of `session.history` afterward so it doesn't consume
+/// the main task's context window or steer the next real turn's answer.
+/// The exchange stays visible in the transcript above — only what gets
+/// *sent to the model next time* is affected. Same "doesn't touch what
+/// it doesn't have to" spirit as `/rewind` (conversation-only, no file
+/// reverting) — this is context-only, no conversation reverting.
+///
+/// Deliberately skips skill-triggering and `@file` expansion: an aside
+/// is meant to be quick, not to pull in more context than the question
+/// itself needs.
+async fn run_aside(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result<bool> {
+    ui.sync_header(session);
+    ui.push_user_prompt(&format!("btw {text}"));
+    ui.draw()?;
+
+    let checkpoint = session.history.len();
+    match session.agent.respond_tui(&mut session.history, text, Vec::new(), ui).await {
+        Ok(_answer) => {}
+        Err(e) => {
+            ui.note(&format!("Aside failed: {e}"), NoteLevel::Error);
+        }
+    }
+    session.history.truncate(checkpoint);
+    ui.sync_header(session);
+    ui.draw()?;
+    Ok(true)
+}
+
 /// Dispatch a slash command, either natively (captured output lands in
 /// the transcript) or by briefly handing the real terminal back for
 /// commands that need blocking `stdin`/hidden-password input. Returns
@@ -1214,6 +1454,10 @@ async fn run_turn(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result
 async fn run_command(ui: &mut TuiCore, session: &mut Session, name: &str, args: &[String]) -> Result<bool> {
     if name == "help" || name == "?" || name == "h" {
         run_help(ui, session, HelpTab::Commands).await?;
+        return Ok(true);
+    }
+    if name == "keybindings" || name == "keys" || name == "shortcuts" {
+        run_help(ui, session, HelpTab::General).await?;
         return Ok(true);
     }
 
@@ -1229,6 +1473,15 @@ async fn run_command(ui: &mut TuiCore, session: &mut Session, name: &str, args: 
         "provider" if args.is_empty() => return Ok(provider_picker(ui, session).await?),
         "resume" if args.is_empty() => return Ok(resume_picker(ui, session).await?),
         "rewind" if args.is_empty() => return Ok(rewind_picker(ui, session).await?),
+        "mcp" if matches!(args.first().map(String::as_str), Some("connect") | Some("disconnect") | Some("status")) => {
+            return mcp_live_cmd(ui, session, args).await;
+        }
+        "agents" if args.first().map(String::as_str) == Some("run") => {
+            return agents_run_cmd(ui, session, args).await;
+        }
+        "ide" if matches!(args.first().map(String::as_str), Some("start") | Some("stop") | Some("status")) => {
+            return ide_live_cmd(ui, session, args).await;
+        }
         _ => {}
     }
 
@@ -1250,6 +1503,141 @@ async fn run_command(ui: &mut TuiCore, session: &mut Session, name: &str, args: 
     ui.sync_header(session);
     ui.draw()?;
     Ok(outcome != CommandOutcome::Exit)
+}
+
+/// `/agents run <name> <task>` — the one `/agents` subcommand that does
+/// real model calls, so (like `/mcp connect`) it needs to be here rather
+/// than on `commands::agents_cmd`'s plain synchronous path. Runs
+/// non-interactively (`respond`'s headless loop, not `respond_tui`) —
+/// see [`crate::agent::subagent::run`] for why: no interactive prompt
+/// surface exists for a subagent's own tool calls, so anything needing
+/// approval is denied by default rather than hanging forever waiting
+/// for an answer nobody can give it. The subagent's result is appended
+/// to the *parent* conversation as an assistant-visible note, the same
+/// way a `btw` aside's answer stays visible without joining the next
+/// turn's context.
+async fn agents_run_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
+    let Some(name) = args.get(1).cloned() else {
+        ui.note("Usage: /agents run <name> \"<task>\"  (see /agents list for defined personas)", NoteLevel::Warning);
+        return Ok(true);
+    };
+    let Some(persona) = crate::agent::subagent::load(session.agent.workspace(), &name) else {
+        ui.note(&format!("No subagent named '{name}' — define one first with /agents create."), NoteLevel::Warning);
+        return Ok(true);
+    };
+    let task = args[2.min(args.len())..].join(" ");
+    if task.trim().is_empty() {
+        ui.note("Usage: /agents run <name> \"<task>\" — a task is required.", NoteLevel::Warning);
+        return Ok(true);
+    }
+
+    ui.push_user_prompt(&format!("/agents run {name} {task}"));
+    ui.note(&format!("Running '{name}' on its own task and context — this blocks until it finishes.", ), NoteLevel::Info);
+    ui.draw()?;
+
+    match crate::agent::subagent::run(&session.config, &persona, &task, true, false).await {
+        Ok(result) => {
+            ui.note(&format!("[{name}] {result}"), NoteLevel::Info);
+        }
+        Err(e) => {
+            ui.note(&format!("Subagent '{name}' failed: {e}"), NoteLevel::Error);
+        }
+    }
+    ui.sync_header(session);
+    ui.draw()?;
+    Ok(true)
+}
+
+/// The `/ide` subcommands that touch the actual running server — see
+/// `crate::ide` for the protocol itself and the honest caveat about
+/// there being no real editor extension yet to connect to it.
+async fn ide_live_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
+    match args.first().map(String::as_str) {
+        Some("start") => match session.agent.start_ide().await {
+            Ok(port) => ui.note(&format!("IDE server listening on 127.0.0.1:{port} (lockfile under the global config dir). No extension connects to it yet — see /ide info."), NoteLevel::Info),
+            Err(e) => ui.note(&format!("Couldn't start the IDE server: {e}"), NoteLevel::Error),
+        },
+        Some("stop") => {
+            if session.agent.stop_ide() {
+                ui.note("IDE server stopped.", NoteLevel::Info);
+            } else {
+                ui.note("IDE server isn't running.", NoteLevel::Warning);
+            }
+        }
+        Some("status") => match session.agent.ide_status() {
+            Some((port, ctx)) => {
+                let mut lines = vec![format!("Running on 127.0.0.1:{port}.")];
+                if let Some(f) = &ctx.open_file {
+                    lines.push(format!("Last reported open file: {f}"));
+                }
+                if let Some((path, start, end)) = &ctx.selection {
+                    lines.push(format!("Last reported selection: {path}:{start}-{end}"));
+                }
+                if ctx.open_file.is_none() && ctx.selection.is_none() {
+                    lines.push("No client has connected and reported anything yet.".to_string());
+                }
+                ui.note(&lines.join(" "), NoteLevel::Info);
+            }
+            None => ui.note("IDE server isn't running — /ide start to begin.", NoteLevel::Info),
+        },
+        _ => {}
+    }
+    ui.draw()?;
+    Ok(true)
+}
+
+/// The three `/mcp` subcommands that need real async I/O (spawning a
+/// process and awaiting a handshake, or just needing a `.await` point to
+/// touch the live `Agent` state at all) — everything else about `/mcp`
+/// (`list`/`add`/`remove`/`enable`/`disable`) is pure config-file
+/// bookkeeping and stays on the fast synchronous path in
+/// `commands::mcp_cmd`, same as before.
+async fn mcp_live_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
+    match args.first().map(String::as_str) {
+        Some("connect") => {
+            let Some(name) = args.get(1).cloned() else {
+                ui.note("Usage: /mcp connect <name>  (see /mcp list for configured servers)", NoteLevel::Warning);
+                return Ok(true);
+            };
+            let Some(server) = session.config.global.mcp_servers.get(&name).cloned() else {
+                ui.note(&format!("No MCP server named '{name}' — add one first with /mcp add."), NoteLevel::Warning);
+                return Ok(true);
+            };
+            let Some(command) = server.command.clone() else {
+                ui.note(&format!("'{name}' has no command set — the SSE/HTTP transport (--url) isn't supported yet, only stdio."), NoteLevel::Warning);
+                return Ok(true);
+            };
+            ui.note(&format!("Connecting to '{name}'…"), NoteLevel::Info);
+            ui.draw()?;
+            match session.agent.connect_mcp_server(&name, &command).await {
+                Ok(n) => ui.note(&format!("Connected to '{name}' — {n} tool{} available.", if n == 1 { "" } else { "s" }), NoteLevel::Info),
+                Err(e) => ui.note(&format!("Couldn't connect to '{name}': {e}"), NoteLevel::Error),
+            }
+        }
+        Some("disconnect") => {
+            let Some(name) = args.get(1) else {
+                ui.note("Usage: /mcp disconnect <name>", NoteLevel::Warning);
+                return Ok(true);
+            };
+            if session.agent.disconnect_mcp_server(name) {
+                ui.note(&format!("Disconnected '{name}'."), NoteLevel::Info);
+            } else {
+                ui.note(&format!("'{name}' isn't currently connected."), NoteLevel::Warning);
+            }
+        }
+        Some("status") => {
+            let connected = session.agent.mcp_server_names();
+            if connected.is_empty() {
+                ui.note("No MCP servers currently connected.", NoteLevel::Info);
+            } else {
+                ui.note(&format!("Connected: {}", connected.join(", ")), NoteLevel::Info);
+            }
+        }
+        _ => {}
+    }
+    ui.sync_header(session);
+    ui.draw()?;
+    Ok(true)
 }
 
 /// Leave the alternate screen, run a command with real blocking
@@ -1297,6 +1685,69 @@ fn run_suspended(ui: &mut TuiCore, session: &mut Session, name: &str, args: &[St
             Ok(CommandOutcome::Continue)
         }
     }
+}
+
+/// Ctrl+G: edit the current input buffer in the user's `$EDITOR` (falling
+/// back to `$VISUAL`, then `notepad` on Windows / `vi` elsewhere) —
+/// exactly the same suspend/leave-alt-screen/resume dance as
+/// [`run_suspended`], just editing a scratch file on disk instead of
+/// running a slash command with blocking stdin.
+fn edit_in_editor(ui: &mut TuiCore) -> Result<()> {
+    use crossterm::terminal::{Clear, ClearType};
+
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() });
+
+    let mut path = std::env::temp_dir();
+    path.push(format!("rexo-prompt-{}.txt", std::process::id()));
+    if let Err(e) = std::fs::write(&path, &ui.input) {
+        ui.note(&format!("Couldn't create scratch file for $EDITOR: {e}"), NoteLevel::Warning);
+        return Ok(());
+    }
+
+    disable_raw_mode()?;
+    execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen, Clear(ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    // Same reasoning as `run_suspended`: drop the live `EventStream`
+    // before the blocking `Command::status()` call below so a stray
+    // keystroke can't be consumed by the old stream's background reader
+    // instead of reaching the editor (or, after it exits, this screen).
+    ui.events = EventStream::new();
+
+    // Split on whitespace so an `$EDITOR` value like `"code --wait"` (a
+    // real, common setting) still works instead of being treated as one
+    // literal binary name that doesn't exist.
+    let mut parts = editor.split_whitespace();
+    let program = parts.next().unwrap_or("vi");
+    let status = std::process::Command::new(program).args(parts).arg(&path).status();
+
+    let result = match status {
+        Ok(s) if s.success() => std::fs::read_to_string(&path).map_err(anyhow::Error::from),
+        Ok(s) => Err(anyhow::anyhow!("{editor} exited with {s}")),
+        Err(e) => Err(anyhow::anyhow!("couldn't launch {editor}: {e}")),
+    };
+    let _ = std::fs::remove_file(&path);
+
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    enable_raw_mode()?;
+    ui.events = EventStream::new();
+    ui.terminal.clear()?;
+
+    match result {
+        Ok(text) => {
+            // Editors conventionally leave a single trailing newline —
+            // trim exactly one so round-tripping empty-or-one-line input
+            // doesn't silently grow a blank line on every use.
+            let trimmed = text.strip_suffix('\n').unwrap_or(&text);
+            ui.input = trimmed.to_string();
+            ui.cursor = ui.input.len();
+            ui.note("Loaded the edited prompt from $EDITOR.", NoteLevel::Info);
+        }
+        Err(e) => {
+            ui.note(&format!("Edit-in-$EDITOR failed: {e}"), NoteLevel::Warning);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
@@ -1734,10 +2185,25 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
                     continue;
                 }
                 ui.last_ctrl_c = None;
+                if key.code != KeyCode::Esc {
+                    ui.last_esc = None;
+                }
 
                 let candidates = ui.autocomplete_cache.clone();
                 match key.code {
                     KeyCode::Enter => {
+                        // A trailing single backslash right before Enter is a
+                        // line-continuation, not a submit — same idea as a
+                        // shell's `\` + newline. Swap it for a literal
+                        // newline and keep editing instead of sending.
+                        if ui.cursor > 0 && ui.input.as_bytes().get(ui.cursor - 1) == Some(&b'\\') {
+                            let idx = ui.cursor - 1;
+                            ui.input.remove(idx);
+                            ui.cursor -= 1;
+                            ui.insert_char('\n');
+                            ui.refresh_autocomplete(session);
+                            continue;
+                        }
                         return Ok(Some(ui.take_input()));
                     }
                     // A bare `?` as the very first character — before
@@ -1749,14 +2215,95 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
                     KeyCode::Char('?') if ui.input.is_empty() && !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) => {
                         return Ok(Some("{?}".to_string()));
                     }
-                    // Quick pickers — jump straight to /model or
-                    // /provider from anywhere, same arrow-key UI either
-                    // command opens on its own.
+                    // Quick pickers — jump straight to /model from
+                    // anywhere (alt+p to match REXO's shortcut sheet;
+                    // alt+m kept too since that's the mnemonic match).
+                    // /provider has no dedicated key of its own anymore
+                    // — it's still one keystroke away as a typed command.
                     KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
                         return Ok(Some("/model".to_string()));
                     }
                     KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
-                        return Ok(Some("/provider".to_string()));
+                        return Ok(Some("/model".to_string()));
+                    }
+                    // Alt+V: paste a clipboard image, attached to the
+                    // next message sent (see `pending_images`).
+                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
+                        match crate::utils::clipboard::paste_image_png() {
+                            Ok(png_bytes) => {
+                                use base64::{engine::general_purpose::STANDARD, Engine as _};
+                                ui.pending_images.push(crate::providers::ImageAttachment {
+                                    mime: "image/png".to_string(),
+                                    base64_data: STANDARD.encode(&png_bytes),
+                                });
+                                ui.note(
+                                    &format!("Image attached ({} pending) — sent with your next message.", ui.pending_images.len()),
+                                    NoteLevel::Info,
+                                );
+                            }
+                            Err(e) => {
+                                ui.note(&format!("Couldn't paste image: {e}"), NoteLevel::Warning);
+                            }
+                        }
+                    }
+                    // Shift+Tab: toggle "auto-accept edits" — the same
+                    // switch `/permissions edit always|ask` flips, just
+                    // one keystroke away rather than a typed command.
+                    KeyCode::BackTab => {
+                        let now_auto = !session.agent.permissions().current_config().allow_edit;
+                        session.agent.permissions_mut().set_auto_allow(PermissionKind::Edit, now_auto);
+                        session.config.permissions.allow_edit = now_auto;
+                        ui.sync_header(session);
+                        ui.note(
+                            if now_auto {
+                                "Auto-accept edits: ON — file edits apply without asking."
+                            } else {
+                                "Auto-accept edits: OFF — file edits ask for approval again."
+                            },
+                            NoteLevel::Info,
+                        );
+                    }
+                    // Ctrl+Shift+_ : undo the single most recent file
+                    // change (see `Agent::undo_last_file_change`). Same
+                    // action as typing `/undo`, for terminals where this
+                    // combination doesn't reach the app.
+                    KeyCode::Char('_') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        match session.agent.undo_last_file_change() {
+                            Ok(msg) => ui.note(&msg, NoteLevel::Info),
+                            Err(msg) => ui.note(&msg, NoteLevel::Warning),
+                        }
+                    }
+                    // Ctrl+G: edit the current input buffer in $EDITOR.
+                    KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        edit_in_editor(ui)?;
+                        ui.refresh_autocomplete(session);
+                    }
+                    // Ctrl+S: stash the current prompt, or restore the
+                    // last one stashed — a single scratch slot.
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if let Some(stashed) = ui.stashed_input.take() {
+                            ui.input = stashed;
+                            ui.cursor = ui.input.len();
+                            ui.note("Restored stashed prompt.", NoteLevel::Info);
+                        } else if !ui.input.is_empty() {
+                            ui.stashed_input = Some(std::mem::take(&mut ui.input));
+                            ui.cursor = 0;
+                            ui.note("Prompt stashed — Ctrl+S to bring it back.", NoteLevel::Info);
+                        }
+                        ui.refresh_autocomplete(session);
+                    }
+                    // Ctrl+T: toggle the task-list panel.
+                    KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        session.ui.tasks_visible = !session.ui.tasks_visible;
+                        ui.sync_header(session);
+                    }
+                    // Ctrl+O: toggle verbose turn-level diagnostics.
+                    KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        session.ui.verbose = !session.ui.verbose;
+                        ui.note(
+                            if session.ui.verbose { "Verbose output on." } else { "Verbose output off." },
+                            NoteLevel::Info,
+                        );
                     }
                     // "Selection mode": releases the terminal's mouse
                     // capture so its *own* click-drag text selection and
@@ -1812,8 +2359,26 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
                     KeyCode::PageUp => ui.scroll_up(),
                     KeyCode::PageDown => ui.scroll_down(),
                     KeyCode::Esc => {
-                        ui.clear_input();
-                        ui.refresh_autocomplete(session);
+                        // First priority: dismiss the autocomplete popup
+                        // without touching the input underneath it.
+                        if !candidates.is_empty() {
+                            ui.autocomplete_cache.clear();
+                            ui.autocomplete_selected = 0;
+                        } else if !ui.input.is_empty() {
+                            // Double-tap to clear — a lone Esc just arms
+                            // it, so a reflexive tap-while-thinking
+                            // doesn't wipe out what's typed so far.
+                            let now = Instant::now();
+                            let recent = ui.last_esc.map(|t| now.duration_since(t) < Duration::from_millis(1200)).unwrap_or(false);
+                            if recent {
+                                ui.clear_input();
+                                ui.refresh_autocomplete(session);
+                                ui.last_esc = None;
+                            } else {
+                                ui.last_esc = Some(now);
+                                ui.note("Press Esc again to clear the input.", NoteLevel::Info);
+                            }
+                        }
                     }
                     _ => {}
                 }

@@ -23,7 +23,6 @@
 
 use std::io;
 use std::path::Path;
-use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -93,9 +92,18 @@ fn run_dialog(workspace: &Path) -> io::Result<bool> {
     let result = loop {
         terminal.draw(|frame| render(frame, workspace, selected))?;
 
-        if !event::poll(Duration::from_millis(150))? {
-            continue;
-        }
+        // Block until a real event arrives instead of polling on a short
+        // timeout and redrawing on every timeout tick regardless of
+        // whether anything changed — the previous version did exactly
+        // that (`event::poll(150ms)` + `continue` on timeout) and
+        // redrew, unconditionally, forever, the entire time this dialog
+        // sits idle waiting for a keypress. Found the same way this
+        // project finds most real bugs: a byte-level PTY test showed a
+        // continuous stream of "reset styling, hide cursor" frames with
+        // no gap between them, not by reading this loop and reasoning
+        // about it. `event::read()` blocks until something (a keypress
+        // or a resize) actually happens, so the loop is now genuinely
+        // idle rather than spinning at ~6.7 draws/sec.
         let Event::Key(key) = event::read()? else {
             continue;
         };

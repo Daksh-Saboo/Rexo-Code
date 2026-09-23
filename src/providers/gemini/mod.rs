@@ -251,6 +251,14 @@ fn build_request(messages: &[ChatMessage], tools: &[ToolDefinition], temperature
                         parts.push(json!({"text": text}));
                     }
                 }
+                // Alt+V-pasted images — Gemini's native format wants each
+                // as its own `inlineData` part alongside the text part,
+                // rather than the data-URL-in-content-string shape the
+                // OpenAI-compatible wire format uses (see
+                // `protocol.rs`'s `WireMessage`).
+                for img in &msg.images {
+                    parts.push(json!({"inlineData": {"mimeType": img.mime, "data": img.base64_data}}));
+                }
                 if !parts.is_empty() {
                     contents.push(json!({"role": "user", "parts": parts}));
                 }
@@ -402,7 +410,7 @@ fn describe_error(status: u16, body: &str, model: &str, url: &str) -> anyhow::Er
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{ChatMessage, ToolCall};
+    use crate::providers::{ChatMessage, ImageAttachment, ToolCall};
 
     #[test]
     fn system_message_becomes_system_instruction_not_a_content_turn() {
@@ -421,6 +429,20 @@ mod tests {
         let contents = req["contents"].as_array().unwrap();
         assert_eq!(contents[1]["role"], "model");
         assert_eq!(contents[1]["parts"][0]["text"], "hello!");
+    }
+
+    #[test]
+    fn images_become_inline_data_parts_alongside_the_text_part() {
+        let messages = vec![ChatMessage::user_with_images(
+            "what's this",
+            vec![ImageAttachment { mime: "image/png".to_string(), base64_data: "QUJD".to_string() }],
+        )];
+        let req = build_request(&messages, &[], 0.3, 4096);
+        let parts = req["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "what's this");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(parts[1]["inlineData"]["data"], "QUJD");
     }
 
     #[test]

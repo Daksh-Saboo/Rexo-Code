@@ -120,6 +120,13 @@ pub struct UiPreferences {
     /// non-slash-command line straight to the OS shell instead of the
     /// model — see `cli::tui::run_shell_command`.
     pub shell_mode: bool,
+    /// Toggled by Ctrl+O. Adds turn-level diagnostic detail (elapsed
+    /// time, context size) to the transcript — see `cli::tui::run_turn`.
+    pub verbose: bool,
+    /// Toggled by Ctrl+T. Whether the task-list panel (backed by the
+    /// `manage_tasks` tool, see `agent::Agent::tasks`) is currently
+    /// shown — see `cli::tui::render::draw`.
+    pub tasks_visible: bool,
 }
 
 impl Default for UiPreferences {
@@ -134,6 +141,8 @@ impl Default for UiPreferences {
             autocompact_threshold: None,
             loop_job: None,
             shell_mode: false,
+            verbose: false,
+            tasks_visible: false,
         }
     }
 }

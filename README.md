@@ -21,22 +21,30 @@ that isn't read-only.
 
 ## Status
 
-This is v0.7.3: a working agent loop with real tool-calling and streaming
-(including native Gemini SSE streaming), support for many
-OpenAI-compatible providers plus local models, a persistent full-screen
-terminal UI with an animated startup intro, arrow-key pickers for
-`/connect`/`/model`/first-launch setup/`/resume`/`/rewind`, session
-persistence (`/resume`, `/branch`, `/fork`), a shell-mode passthrough
-(`!`), a skills system, custom commands, a permission/security layer
-gating every tool call, a provider capability model and normalized error
-classification, and CI/packaged downloads for all five target platforms
-instead of source-only delivery. It has not been run against a large
-real-world codebase yet — treat it as an early, working foundation
-rather than a finished product. See [Roadmap](#roadmap) for what's next,
-and [Known limitations](#known-limitations) for an honest list of what's
-config/UI-only vs. actually wired up (MCP tool execution, in particular,
-isn't yet — `/mcp` configures a server entry, it doesn't speak the
-protocol yet).
+This is v0.8.0: a working agent loop with real tool-calling and streaming
+(including native Gemini SSE streaming and multimodal image input via
+Alt+V), support for many OpenAI-compatible providers plus local models, a
+persistent full-screen terminal UI with an animated startup intro, arrow-key
+pickers for `/connect`/`/model`/first-launch setup/`/resume`/`/rewind`,
+session persistence (`/resume`, `/branch`, `/fork`), a shell-mode
+passthrough (`!`), quick side questions (`btw <question>`), a skills
+system, custom commands, installable plugins bundling skills/commands/hooks
+(`/plugin`), a real MCP client speaking the actual stdio JSON-RPC protocol
+(`/mcp connect`), lifecycle hooks around tool calls and session start/end
+(`/hooks`), sequential subagents with their own persona and context
+(`/agents run`), a model-driven task list (Ctrl+T), single-level file-edit
+undo (`/undo`, Ctrl+Shift+_), a local server for future editor integration
+(`/ide` — see [Known limitations](#known-limitations), no editor extension
+ships yet), a permission/security layer gating every tool call, a provider
+capability model and normalized error classification, and CI/packaged
+downloads for all five target platforms instead of source-only delivery.
+It has not been run against a large real-world codebase yet — treat it as
+an early, working foundation rather than a finished product. See
+[Roadmap](#roadmap) for what's next, and [Known limitations](#known-limitations)
+for an honest list of what's real vs. still scoped down (background/
+concurrent subagents with git-worktree isolation, in particular, aren't —
+`/agents run` is real but sequential, blocking the session until it
+finishes).
 
 **Renamed from TRON-Code to Rexo Code in v0.7.1** — a naming clash with
 an existing, unrelated project. Everything user-facing changed to match:
@@ -496,9 +504,9 @@ the same way.
 
 `/help` opens as a full-screen overlay (General / Commands / Custom
 commands tabs, ←/→ to switch, ↑/↓ to scroll) rather than a wall of text —
-run it any time for the complete, current command list; a few entries are
-marked `(planned)` where they're registered for discoverability but don't
-do anything yet (see [Roadmap](#roadmap)).
+run it any time for the complete, current command list; `/background` is
+marked `(planned)` — it's registered for discoverability but doesn't do
+anything yet (see [Roadmap](#roadmap)) — everything else in the list is real.
 
 Permission prompts (`y` once / `a` always this session / `n` deny) are a
 proper modal in this same screen — not a second blocking `stdin` read
@@ -912,9 +920,10 @@ it's obvious something's missing.
 Inside an interactive session, you don't need to edit `rexo.toml` or
 restart to change anything — everything below takes effect immediately.
 This is the core set; run **`/help`** (or type **`{?}`** for just the
-keyboard shortcuts) for the complete, current list — around 50 commands as
-of v0.3.0, a handful marked `(planned)` and registered honestly rather
-than left out or faked:
+keyboard shortcuts) for the complete, current list — around 55 commands as
+of v0.8.0, with `/background` the one command marked `(planned)` and
+registered honestly rather than left out or faked (it needs git-worktree
+isolation — see [Roadmap](#roadmap)):
 
 ```
 /help                  Show the full-screen command browser
@@ -1169,11 +1178,35 @@ Called out here rather than left implicit, per the principle this project
 tries to hold itself to: don't claim something works when it's only
 partially there.
 
-- **MCP is configuration-only.** `/mcp` saves/lists server definitions in
-  global config, but REXO doesn't speak the MCP protocol to them yet — no
-  connection, capability discovery, or tool execution. What's there is the
-  layer that *will* route through the same permission engine as every
-  other tool once the protocol client exists, not a live integration today.
+- **MCP: stdio transport only, no reconnect, no resources/prompts.**
+  `/mcp connect` does the real thing — spawns the server, completes the
+  `initialize` handshake, discovers tools, and registers each one as a
+  real, permission-gated REXO tool. What's not there yet: the SSE/HTTP
+  transport (the `url` half of a server config), automatic reconnect if
+  a connected server crashes (its tools just start erroring until you
+  `/mcp connect` again), and the resource/prompt halves of the MCP spec
+  (tool-calling only — the part REXO's own agent loop can act on).
+- **Hooks run real shell commands with no sandboxing.** `/hooks`'
+  `pre_tool`/`post_tool`/`session_start`/`session_end` events genuinely
+  execute what you configure, with the same trust model as any other
+  command REXO runs on your behalf — a hook is exactly as powerful as
+  typing the command yourself, not sandboxed or resource-limited.
+- **Subagents (`/agents run`) are sequential, not concurrent.** A real,
+  bounded, persona-configured agent runs a task to completion using its
+  own conversation — but it blocks the parent session until it finishes,
+  and shares the same workspace with no isolation. Concurrent/backgrounded
+  subagents need git-worktree isolation on top of this, which isn't
+  built — see [Roadmap](#roadmap).
+- **`/ide` has no editor extension to talk to yet.** The server side is
+  real and tested (a local TCP server, a documented newline-JSON
+  protocol, a discovery lockfile) — but there's no VSCode/JetBrains
+  extension in this release that connects to it. Building one is a
+  separate project in a different language ecosystem.
+- **Plugins have no sandboxing, versioning, or remote install.** A
+  plugin is a local folder you (or someone you trust) put at
+  `.rexo/plugins/<name>/` — its hooks run with the same trust as any
+  other hook, there's no dependency resolution between plugins, and
+  there's no plugin registry to install *from*.
 - **Credentials are file-based, not an OS-encrypted vault.** See
   [Configuration, providers, and credentials](#configuration-providers-and-credentials)
   — real, workspace-independent, permission-hardened persistence, but not
@@ -1183,8 +1216,10 @@ partially there.
   parallel_tools/structured_output/model_discovery/context_window/
   max_output/cancellation/usage_reporting) and is now shown in `/status`,
   but nothing in the agent loop gates behavior on it yet (e.g. refusing a
-  vision request on a text-only model) — it's an honest "don't know" for
-  most endpoints and most fields, not a populated capability matrix.
+  vision request on a text-only model — Alt+V will still attach an image,
+  it just won't be useful against a model that can't see it) — it's an
+  honest "don't know" for most endpoints and most fields, not a populated
+  capability matrix.
 - **No adapters yet for non-OpenAI-compatible protocols** — Anthropic,
   Cohere, AWS Bedrock. Not in the `/connect` catalog at all rather than
   listed and silently broken. (Google Gemini *does* have a native adapter
@@ -1211,11 +1246,11 @@ partially there.
   roadmap's full "multiple simultaneous working directories," not that
   item finished — `/workspace`/`/cd` still switch rather than add for
   anything beyond reading.
-- **`/copy` needs a reachable display server/clipboard.** It's a real OS
-  clipboard call (`arboard`), which means it can't do anything useful in
-  a headless/no-display environment (SSH without X forwarding, some CI) —
-  `/export` still works there. No conversation branching/forking, no
-  session persistence/resume, no rewind/checkpoints yet.
+- **`/copy` needs a reachable display server/clipboard**, and so does
+  Alt+V's clipboard image paste — both are real OS clipboard calls
+  (`arboard`), which means neither does anything useful in a
+  headless/no-display environment (SSH without X forwarding, some CI) —
+  `/export` still works there.
 - **Skills and custom commands are keyword/template-based, not smart.**
   Skill triggers are plain case-insensitive substring matches (no
   semantic search), and custom-command placeholders are literal string
@@ -1229,12 +1264,11 @@ partially there.
   File Explorer and looks at the icon, so whether it actually shows up
   correctly is still unconfirmed. Try a downloaded build and file an
   issue if it doesn't show up.
-- **No hooks, subagents, worktree isolation, or background
-  sessions.** These are real, deliberately-out-of-scope-for-now
-  architecture directions (see the harness-related items in
-  [Roadmap](#roadmap)) rather than things REXO tried and got wrong — the
-  provider/tool/permission abstractions here were built with room for them,
-  but building them out is future work, not a partial/broken feature today.
+- **No git-worktree isolation or background sessions.** The one real,
+  deliberately-out-of-scope-for-now architecture direction left from the
+  original "harness" list — see [Roadmap](#roadmap). Everything else that
+  list used to cover (hooks, a skill system, subagents) is real as of
+  v0.8.0.
 
 ## Roadmap
 
@@ -1294,19 +1328,46 @@ partially there.
 - [x] Session persistence, `/resume`, `/branch`, `/rewind` (v0.7.1) —
       conversation-level (see the caveat below); `/fork` too, scoped
       honestly as a saved divergence point, not background execution
+- [x] MCP protocol client (v0.8.0) — `/mcp connect` does a real stdio
+      JSON-RPC handshake, discovers tools, and registers them through the
+      same permission engine as every native tool. SSE/HTTP transport,
+      auto-reconnect, and resources/prompts are still missing — see
+      [Known limitations](#known-limitations).
+- [x] Lifecycle hooks (v0.8.0) — `pre_tool`/`post_tool`/`session_start`/
+      `session_end`, real shell commands with Claude-Code-style exit-code
+      semantics (0 allows, 2 blocks, anything else warns), config at
+      `.rexo/hooks.toml`
+- [x] Sequential subagents (v0.8.0) — `/agents create`/`run`: a real,
+      persona-configured `Agent` runs a bounded task to completion in its
+      own conversation and reports back. Blocking, not backgrounded — see
+      [Known limitations](#known-limitations) for what that means.
+- [x] Installable plugins (v0.8.0) — `/plugin enable` installs a bundle
+      of skills/commands/hooks from `.rexo/plugins/<name>/`, precisely
+      reversible by `/plugin disable`
+- [x] A local server for editor/IDE integration (v0.8.0) — `/ide start`;
+      real and tested REXO-side, but no editor extension exists yet to
+      connect to it
+- [x] A model-driven task list (v0.8.0) — Ctrl+T, backed by a real
+      `manage_tasks` tool the model can add/complete/remove from
+- [x] Single-level file-edit undo (v0.8.0) — `/undo`/Ctrl+Shift+_ reverts
+      the single most recent `edit_file`/`create_file`/`delete_file` call;
+      not the general workspace-checkpoint system below
+- [x] Clipboard image paste (v0.8.0) — Alt+V attaches a screenshot to
+      your next message for a vision-capable model (OpenAI-compatible
+      multipart and native Gemini `inlineData` wire formats)
+- [x] Quick side questions (v0.8.0) — `btw <question>` answers with full
+      context but doesn't consume it, the same way `/rewind` reverts
+      conversation without touching files
 
-**On `/background`, `/agents`, and a real `/mcp` protocol client** — all
-still show `(planned)` in `/help`, deliberately, not by oversight.
-`/background`/`/agents` need git-worktree isolation so a background or
-parallel run can't collide with the workspace you're actively looking
-at, on top of the session system that now exists — that isolation layer
-is still a from-scratch subsystem, not a small addition. `/mcp`
-currently only *configures* a server entry (§40 in the project's own
-architecture doc) — actually speaking the protocol means a JSON-RPC
-client over stdio/SSE, a capability handshake, and wiring discovered
-tools through the existing permission engine so an MCP tool is gated
-exactly like a native one. Neither is a command to bolt on; each is
-closer to its own release.
+**On background/concurrent subagents and worktree isolation** — still the
+one real gap left from the original "harness" wishlist. `/agents run`
+(v0.8.0) is a genuine, working subagent — its own persona, its own
+conversation, its own bounded tool-use loop — but it's sequential: it
+blocks the session it was launched from until it finishes, and shares the
+workspace with no isolation. Running several of these concurrently without
+them colliding on the same files needs git-worktree isolation, which
+doesn't exist yet — that's a from-scratch subsystem, not a small addition
+on top of what's here now.
 
 Also worth being precise about since it's easy to overstate: `/rewind`
 is **conversation-only**. It truncates chat history back to an earlier
@@ -1314,8 +1375,6 @@ point; it does not revert any file edits the agent made after that
 point. Reverting file state too would need workspace snapshots
 (git-based or otherwise), which isn't built — `/rewind`'s own output
 says this every time, not just here.
-- [ ] MCP protocol client: connect, discover tools/resources/prompts,
-      execute through the existing permission engine
 - [ ] Capability-aware agent behavior (actually gating on
       `Provider::capabilities()`, not just displaying it)
 - [x] Native Google Gemini driver, with real SSE streaming as of v0.6 —
@@ -1327,7 +1386,8 @@ says this every time, not just here.
       can't do what the task needs)
 - [x] Multiple simultaneous working directories, read-only (`/add-dir`) —
       write tools still scoped to the primary workspace only
-- [x] Clipboard integration (`/copy`, real OS clipboard via `arboard`)
+- [x] Clipboard integration (`/copy`, real OS clipboard via `arboard`;
+      Alt+V clipboard *image* paste as of v0.8.0)
 - [x] Arrow-key, type-to-filter pickers for `/connect`/`/model`/`/models`/
       `/provider`, fully in-TUI (masked API-key entry included)
 - [x] A skills system (`.rexo/skills/`, keyword-triggered + `/skill`)
@@ -1342,27 +1402,28 @@ says this every time, not just here.
 - [ ] Faster/smarter search (currently a plain recursive substring scan)
 - [ ] Config-file-level command allow/deny customization
 - [ ] Broader automated test coverage (currently thorough unit tests per
-      module; no end-to-end integration harness yet)
+      module, plus real PTY-driven end-to-end smoke tests against the
+      compiled binary each release; no *automated*, checked-in
+      integration harness yet — the PTY tests are written and run by
+      hand each session, not part of `cargo test`)
 - [x] Packaged releases (GitHub Releases, five platforms — see
       [Downloads](#downloads)); crates.io publishing not done yet
-- [ ] Editor/IDE integration (`/ide`) and an installable plugin system
-      (`/plugin`) — both registered commands today, honestly `(planned)`
 
 ### Harness direction (longer-term, architected for but not built)
 
 The provider/tool/permission abstractions here were designed with room for
-these, but they're genuinely separate, sizable pieces of work — listed
-honestly as direction, not partially-built features:
+these from the start. Most of the original list is real as of v0.8.0 —
+hooks, a skill system, and subagents all shipped (see the checklist above
+and [Known limitations](#known-limitations) for exactly what each one
+does and doesn't cover). What's left:
 
-- Repository-level lifecycle hooks (`.rexo/hooks.toml`: pre/post-tool-use,
-  session start/end, ...) — sandboxed, permission-aware, disableable
-- A skill system (`.rexo/skills/`: named, capability-limited workflows)
-- Session checkpoints and explicit `/rewind` (beyond what `git` already gives you)
+- Session checkpoints (beyond conversation-only `/rewind` — reverting
+  file state too, git-based or otherwise)
 - Background sessions (run a task without occupying the foreground session)
 - Git-worktree isolation for background/parallel tasks, with an explicit
-  review-and-merge step — never an automatic silent merge
-- Controlled subagents with isolated context, limited tools, and hard
-  resource limits (`max_depth`/`max_agents`/`max_runtime`/`max_tool_calls`)
+  review-and-merge step — never an automatic silent merge — which is also
+  the prerequisite for running `/agents run` concurrently instead of
+  sequentially
 - Machine-maintained project memory (`.rexo/memory/`), kept explicitly
   subordinate to human-authored `REXO.md`
 

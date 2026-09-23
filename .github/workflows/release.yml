@@ -1,103 +1,313 @@
-# Builds a real, downloadable rexo binary for all five platforms and
-# attaches them to a GitHub Release. This is the actual "download" path —
-# CI (ci.yml) proves every target *builds*; this workflow is what makes a
-# built binary something a person can fetch without owning a Rust
-# toolchain.
+# ============================================================
+# Rexo Code — Release Workflow
+# ============================================================
 #
-# Triggered by pushing a tag like `v0.5.0`. Each matrix leg builds on its
-# *own* OS (native, not cross-compiled from Linux — macOS binaries need
-# Apple's own linker/SDK, which isn't legally redistributable for
-# cross-compilation, so "native runner per OS" is the correct approach
-# here, not a shortcut) and uploads a zip/tar.gz containing:
-#   rexo(.exe), README.md, LICENSE, the matching install script, and,
-#   for Windows, rexo.ico + windows-terminal-profile.json.
+# Creates a GitHub Release containing native binaries for:
+#   - Linux x86_64
+#   - macOS ARM64
+#   - Windows x86_64
+#   - Windows ARM64
+#
+# Release modes:
+#
+# 1. Push a tag:
+#      git tag v8.0.0
+#      git push origin v8.0.0
+#
+#    -> Builds that exact tag and publishes the release.
+#
+# 2. Run manually from GitHub Actions:
+#      Actions -> Release -> Run workflow
+#      Tag: v8.0.0
+#
+#    -> Creates the tag on the selected commit,
+#       builds that exact tag, and publishes the release.
+#
+# Every release contains:
+#   - Rexo binary
+#   - README.md
+#   - LICENSE
+#   - Installer scripts
+#   - Windows assets
+#   - SHA256SUMS.txt
+#
+# ============================================================
+
 name: Release
 
 on:
   push:
     tags:
       - "v*.*.*"
+
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and release (e.g. v0.5.0)"
+        description: "Release tag (example: v8.0.0)"
         required: true
+        type: string
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
   BIN_NAME: rexo
 
+# ============================================================
+# Prepare release
+# ============================================================
+
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $TAG"
+            echo "Expected format: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          echo "Release tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag for manual release
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists."
+
+            EXISTING_SHA="$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')"
+            CURRENT_SHA="${GITHUB_SHA}"
+
+            echo "Existing tag SHA: $EXISTING_SHA"
+            echo "Current SHA:       $CURRENT_SHA"
+
+            if [[ "$EXISTING_SHA" != "$CURRENT_SHA" ]]; then
+              echo "ERROR: Tag $TAG already exists and points to another commit."
+              exit 1
+            fi
+
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" "$GITHUB_SHA" -m "Rexo Code $TAG"
+          git push origin "$TAG"
+
+          echo "Created and pushed tag $TAG"
+
+# ============================================================
+# Build binaries
+# ============================================================
+
   build:
-    name: ${{ matrix.name }}
+    name: Build ${{ matrix.name }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
+
       matrix:
         include:
+
+          # -------------------------
+          # Linux x86_64
+          # -------------------------
+
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-          - name: macos-x86_64
-            os: macos-13
-            target: x86_64-apple-darwin
-            archive: tar.gz
+
+          # -------------------------
+          # macOS ARM64
+          # -------------------------
+
           - name: macos-aarch64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
             archive: tar.gz
+
+          # -------------------------
+          # Windows x86_64
+          # -------------------------
+
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
+
+          # -------------------------
+          # Windows ARM64
+          # -------------------------
+
           - name: windows-aarch64
-            os: windows-latest
+            os: windows-11-arm
             target: aarch64-pc-windows-msvc
             archive: zip
 
     steps:
-      - uses: actions/checkout@v4
+
+      # ======================================================
+      # Checkout EXACT release tag
+      # ======================================================
+
+      - name: Checkout release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+
+      # ======================================================
+      # Install Rust
+      # ======================================================
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      # ======================================================
+      # Rust cache
+      # ======================================================
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
+      # ======================================================
+      # Linux dependencies
+      # ======================================================
+
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
 
-      - name: Build (release)
-        run: cargo build --release --target ${{ matrix.target }}
+      # ======================================================
+      # Build
+      # ======================================================
 
-      - name: Stage package contents (Unix)
+      - name: Build release binary
+        shell: bash
+        run: |
+          cargo build --release --target "${{ matrix.target }}"
+
+      # ======================================================
+      # Package Unix
+      # ======================================================
+
+      - name: Package Unix
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          STAGE="stage/rexo-code-${{ matrix.name }}"
-          mkdir -p "$STAGE"
-          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$STAGE/"
-          cp README.md LICENSE "$STAGE/"
-          cp install.sh uninstall.sh "$STAGE/"
-          chmod +x "$STAGE/${BIN_NAME}" "$STAGE/install.sh" "$STAGE/uninstall.sh"
-          tar -C stage -czf "rexo-code-${{ matrix.name }}.tar.gz" "rexo-code-${{ matrix.name }}"
 
-      - name: Stage package contents (Windows)
+          STAGE="stage/rexo-code-${{ matrix.name }}"
+
+          mkdir -p "$STAGE"
+
+          cp \
+            "target/${{ matrix.target }}/release/${BIN_NAME}" \
+            "$STAGE/"
+
+          cp README.md LICENSE "$STAGE/"
+
+          cp \
+            install.sh \
+            uninstall.sh \
+            "$STAGE/"
+
+          chmod +x \
+            "$STAGE/${BIN_NAME}" \
+            "$STAGE/install.sh" \
+            "$STAGE/uninstall.sh"
+
+          tar \
+            -C stage \
+            -czf "rexo-code-${{ matrix.name }}.tar.gz" \
+            "rexo-code-${{ matrix.name }}"
+
+      # ======================================================
+      # Package Windows
+      # ======================================================
+
+      - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
           $Stage = "stage/rexo-code-${{ matrix.name }}"
-          New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" $Stage
-          Copy-Item README.md, LICENSE, install.ps1, install.bat, uninstall.ps1 $Stage
-          Copy-Item assets/rexo.ico, assets/windows-terminal-profile.json $Stage
-          Compress-Archive -Path "$Stage/*" -DestinationPath "rexo-code-${{ matrix.name }}.zip"
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $Stage | Out-Null
+
+          Copy-Item `
+            "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" `
+            $Stage
+
+          Copy-Item `
+            README.md, `
+            LICENSE, `
+            install.ps1, `
+            install.bat, `
+            uninstall.ps1 `
+            $Stage
+
+          Copy-Item `
+            assets/rexo.ico, `
+            assets/windows-terminal-profile.json `
+            $Stage
+
+          Compress-Archive `
+            -Path "$Stage/*" `
+            -DestinationPath "rexo-code-${{ matrix.name }}.zip" `
+            -Force
+
+      # ======================================================
+      # Upload build artifact
+      # ======================================================
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -106,25 +316,60 @@ jobs:
           path: rexo-code-${{ matrix.name }}.${{ matrix.archive }}
           if-no-files-found: error
 
+# ============================================================
+# Publish GitHub Release
+# ============================================================
+
   publish:
-    name: Publish release
-    needs: build
+    name: Publish GitHub Release
+    needs:
+      - prepare
+      - build
+
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/download-artifact@v4
+
+      # ======================================================
+      # Download all platform artifacts
+      # ======================================================
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Checksums
+      # ======================================================
+      # Generate SHA256 checksums
+      # ======================================================
+
+      - name: Generate SHA256 checksums
+        shell: bash
         run: |
+          set -euo pipefail
+
           cd dist
-          sha256sum * > SHA256SUMS.txt
+
+          sha256sum \
+            rexo-code-*.tar.gz \
+            rexo-code-*.zip \
+            > SHA256SUMS.txt
+
           cat SHA256SUMS.txt
+
+      # ======================================================
+      # Create GitHub Release
+      # ======================================================
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: dist/*
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Rexo Code ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
+          files: |
+            dist/rexo-code-*.tar.gz
+            dist/rexo-code-*.zip
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true

@@ -13,7 +13,6 @@ use super::{EntryKind, HelpState, HelpTab, PermissionView, UiState, SPINNER_FRAM
 use crate::agent::NoteLevel;
 
 const HEADER_HEIGHT: u16 = 6;
-const INPUT_HEIGHT: u16 = 3;
 const HINT_HEIGHT: u16 = 1;
 
 /// The header mascot's two-character "eyes," reacting to whatever the
@@ -71,21 +70,34 @@ pub(super) fn draw(f: &mut Frame<'_>, core: &UiState) {
     }
 
     let area = f.size();
+    // Backslash+Enter (see `read_input`'s `KeyCode::Enter` arm) inserts a
+    // literal newline instead of submitting, so the box needs to grow to
+    // fit more than one line — capped so one very long paste can't push
+    // the transcript off-screen entirely.
+    let input_lines = core.input.matches('\n').count() as u16 + 1;
+    let input_height = (input_lines + 2).min(8);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Min(3),
-            Constraint::Length(INPUT_HEIGHT),
+            Constraint::Length(input_height),
             Constraint::Length(HINT_HEIGHT),
         ])
         .split(area);
 
     draw_header(f, chunks[0], core);
-    draw_transcript(f, chunks[1], core);
+    if core.tasks_visible {
+        let cols = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Min(20), Constraint::Length(30)]).split(chunks[1]);
+        draw_transcript(f, cols[0], core);
+        draw_tasks_panel(f, cols[1], core);
+        draw_autocomplete(f, cols[0], core);
+    } else {
+        draw_transcript(f, chunks[1], core);
+        draw_autocomplete(f, chunks[1], core);
+    }
     draw_input(f, chunks[2], core);
     draw_hint(f, chunks[3], core);
-    draw_autocomplete(f, chunks[1], core);
 
     if let Some(p) = &core.permission {
         draw_permission_modal(f, area, p);
@@ -252,18 +264,39 @@ pub(super) fn styled_line(text: String, color: Color, bold: bool) -> Line<'stati
 // ---------------------------------------------------------------------
 
 fn draw_input(f: &mut Frame<'_>, area: Rect, core: &UiState) {
-    let title = if core.permission.is_some() {
-        " permission needed "
+    // Base title + border color from the box's actual committed state —
+    // then a *live* preview, still before Enter is pressed, for the one
+    // character that's about to change that state: bare `!` previews
+    // the shell-mode toggle it's about to trigger, `!<cmd>` previews
+    // that it'll run once rather than go to the model. Neither preview
+    // shows once shell mode is already on — the persistent indicator
+    // takes over at that point.
+    let (mut title, mut border_color) = if core.permission.is_some() {
+        (" permission needed ".to_string(), core.header.accent)
     } else if core.shell_mode {
-        " SHELL MODE — ! or 'exit' to leave "
+        (" SHELL MODE — ! or 'exit' to leave ".to_string(), Color::Yellow)
+    } else if core.input == "!" {
+        (" ! + Enter -> toggle shell mode ".to_string(), Color::Cyan)
+    } else if core.input.starts_with('!') && core.input.len() > 1 {
+        (" !cmd + Enter -> runs once in your shell ".to_string(), Color::Cyan)
     } else {
-        ""
+        (String::new(), core.header.accent)
     };
-    let border_color = if core.shell_mode { Color::Yellow } else { core.header.accent };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title(title);
+    if !core.pending_images.is_empty() {
+        let n = core.pending_images.len();
+        let noun = if n == 1 { "image" } else { "images" };
+        if title.is_empty() {
+            title = format!(" {n} {noun} attached — Enter to send ");
+        } else {
+            title = format!("{} · {n} {noun} attached ", title.trim_end());
+        }
+        // A queued image is worth a visible border even when nothing
+        // else about the box's state would otherwise change it.
+        if border_color == core.header.accent {
+            border_color = Color::Magenta;
+        }
+    }
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color)).title(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -276,16 +309,59 @@ fn draw_input(f: &mut Frame<'_>, area: Rect, core: &UiState) {
         return;
     }
 
-    let display = if core.input.is_empty() && core.transcript.is_empty() {
-        Line::from(Span::styled(format!("Try \"{}\"", core.suggestion), Style::default().fg(Color::DarkGray)))
-    } else {
-        Line::from(Span::raw(core.input.clone()))
-    };
-    f.render_widget(Paragraph::new(display), inner);
+    if core.input.is_empty() && core.transcript.is_empty() {
+        let p = Paragraph::new(Line::from(Span::styled(format!("Try \"{}\"", core.suggestion), Style::default().fg(Color::DarkGray))));
+        f.render_widget(p, inner);
+        f.set_cursor(inner.x, inner.y);
+        return;
+    }
 
-    let cursor_col = core.input[..core.cursor].chars().count() as u16;
+    // `\` + Enter (see `read_input`) inserts a literal `\n` instead of
+    // submitting — split on it so a multi-line draft actually renders as
+    // multiple lines rather than one line with an invisible control
+    // character in it.
+    let lines: Vec<Line> = core.input.split('\n').map(|l| Line::from(Span::raw(l.to_string()))).collect();
+    f.render_widget(Paragraph::new(lines), inner);
+
+    let before_cursor = &core.input[..core.cursor];
+    let cursor_row = before_cursor.matches('\n').count() as u16;
+    let cursor_col = before_cursor.rsplit('\n').next().unwrap_or("").chars().count() as u16;
     let cursor_x = (inner.x + cursor_col).min(inner.x + inner.width.saturating_sub(1));
-    f.set_cursor(cursor_x, inner.y);
+    let cursor_y = (inner.y + cursor_row).min(inner.y + inner.height.saturating_sub(1));
+    f.set_cursor(cursor_x, cursor_y);
+}
+
+fn draw_tasks_panel(f: &mut Frame<'_>, area: Rect, core: &UiState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(core.header.accent))
+        .title(" Tasks (Ctrl+T) ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if core.tasks_snapshot.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled("(none yet)", Style::default().fg(Color::DarkGray)))).wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let lines: Vec<Line> = core
+        .tasks_snapshot
+        .iter()
+        .map(|t| {
+            let (mark, color) = if t.done { ("✓", Color::Green) } else { ("○", Color::DarkGray) };
+            Line::from(vec![
+                Span::styled(format!("{mark} "), Style::default().fg(color)),
+                Span::styled(
+                    t.text.clone(),
+                    if t.done { Style::default().fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT) } else { Style::default() },
+                ),
+            ])
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
 fn draw_hint(f: &mut Frame<'_>, area: Rect, core: &UiState) {
