@@ -35,12 +35,18 @@ directly from your terminal.
 ## 🎬 Rexo in Action
 
 <p align="center">
-  <img src="docs/images/rexo-demo.gif" alt="Rexo Code demo" width="900">
+  <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084029.jpg?raw=true" width="48%">
+  <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084605.jpg?raw=true" width="48%">
 </p>
 
-> Videos, GIFs, and screenshots can be added here as the project showcase evolves.
+<p align="center">
+  <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084644.jpg?raw=true" width="48%">
+  <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084703.jpg?raw=true" width="48%">
+</p>
 
----
+<p align="center">
+  <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084946.jpg?raw=true" width="70%">
+</p>
 
 # 🚀 Why Rexo?
 
