@@ -16,6 +16,7 @@
 pub mod commands;
 pub mod completion;
 pub mod custom_commands;
+pub mod doctor;
 pub mod file_ref;
 pub mod frontmatter;
 pub mod parser;
@@ -127,6 +128,13 @@ pub struct UiPreferences {
     /// `manage_tasks` tool, see `agent::Agent::tasks`) is currently
     /// shown — see `cli::tui::render::draw`.
     pub tasks_visible: bool,
+    /// Toggled by Ctrl+B (or bare `/agents`/`/background`). Whether the
+    /// background-jobs panel (defined personas plus everything spawned
+    /// via `/agents run` or `/background` — see `agent::background`) is
+    /// currently shown, and which row is selected for Enter/delete —
+    /// see `cli::tui::render::draw_agents_panel`.
+    pub agents_panel_visible: bool,
+    pub agents_panel_selected: usize,
 }
 
 impl Default for UiPreferences {
@@ -143,6 +151,8 @@ impl Default for UiPreferences {
             shell_mode: false,
             verbose: false,
             tasks_visible: false,
+            agents_panel_visible: false,
+            agents_panel_selected: 0,
         }
     }
 }

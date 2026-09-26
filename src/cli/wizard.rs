@@ -227,11 +227,23 @@ async fn run_full_wizard_inner(
             config.global.save()?;
             return Ok(true);
         };
-        ("openai_compatible".to_string(), name, true, None)
+        let kind = ask_wire_format(terminal, events, accent).await?;
+        (kind, name, true, None)
     } else {
         let preset = crate::providers::catalog::find(&key).expect("picker only offers catalog keys");
-        let kind = if preset.key == "nvidia" { "nvidia" } else if preset.key == "local" { "local" } else { "openai_compatible" };
-        (kind.to_string(), preset.display_name.to_string(), preset.requires_key, preset.base_url)
+        // The catalog's own `kind` is the source of truth here — this
+        // used to re-derive it via `if preset.key == "nvidia" {...} else
+        // if ... else { "openai_compatible" }`, which silently fell
+        // through to `openai_compatible` for any preset the chain didn't
+        // explicitly name. Gemini's preset (added after that chain was
+        // written) was actually hitting that fallback: picking Gemini
+        // from *this* first-launch wizard mis-routed it through the
+        // OpenAI-compatible client — wrong auth header, wrong request
+        // shape, guaranteed 401 — even though `/connect` (which already
+        // read `preset.kind` directly) had no such bug. Reading the
+        // field directly means a new native-driver preset can't skew
+        // out of sync with this match again.
+        (preset.kind.to_string(), preset.display_name.to_string(), preset.requires_key, preset.base_url)
     };
     let preset_key = if key == "__custom__" { None } else { Some(key.clone()) };
 
@@ -348,6 +360,35 @@ async fn run_full_wizard_inner(
         println!("{}", "  (session only — this won't be here next time; run /connect to save it for good)".dimmed());
     }
     Ok(true)
+}
+
+/// The same "which wire format does this endpoint actually speak"
+/// question `/connect`'s custom-endpoint flow asks — factored out so the
+/// first-launch wizard's own custom-endpoint path asks it too, instead
+/// of silently assuming OpenAI-compatible the way both paths used to.
+pub(crate) async fn ask_wire_format(terminal: &mut ratatui::Terminal<picker::Backend>, events: &mut crossterm::event::EventStream, accent: ratatui::style::Color) -> Result<String> {
+    let items = vec![
+        picker::PickerItem::with_sub("OpenAI-compatible", "the /chat/completions shape most endpoints speak", "openai_compatible"),
+        picker::PickerItem::with_sub("Anthropic-native", "Messages API shape (x-api-key, content blocks)", "anthropic"),
+        picker::PickerItem::with_sub("Google Gemini-native", "generateContent shape (x-goog-api-key)", "gemini"),
+    ];
+    let outcome = picker::run_select(
+        terminal,
+        events,
+        picker::SelectOptions {
+            title: "Wire format".to_string(),
+            items,
+            accent,
+            allow_custom: false,
+            subtitle: Some("Which API shape does this endpoint actually speak?".to_string()),
+            search_placeholder: "",
+        },
+    )
+    .await?;
+    Ok(match outcome {
+        picker::PickerOutcome::Selected(k) => k,
+        _ => "openai_compatible".to_string(),
+    })
 }
 
 fn prompt(label: &str) -> Result<String> {

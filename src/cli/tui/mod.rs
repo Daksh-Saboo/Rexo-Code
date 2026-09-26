@@ -112,6 +112,8 @@ pub(crate) const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+S", "Stash the current prompt, or restore the last one stashed"),
     ("Ctrl+O", "Toggle verbose turn-level diagnostics (elapsed time, context size)"),
     ("Ctrl+T", "Toggle the task-list panel (tasks the model tracks with the manage_tasks tool)"),
+    ("Ctrl+B", "Toggle the agents/background panel (personas + /agents run and /background jobs)"),
+    ("Ctrl+X", "With the agents/background panel open: delete the selected persona, or cancel/remove the selected job"),
     ("Ctrl+Y", "Toggle selection mode — release the mouse so your terminal's own select & copy works"),
     ("Esc", "Close a popup (help, autocomplete, permission prompt) / press twice to clear the input line"),
     ("Ctrl+C", "Cancel the current turn, or clear/exit at an idle prompt (press twice)"),
@@ -171,6 +173,11 @@ struct HeaderInfo {
     terminal_auto: bool,
     git_auto: bool,
     accent: Color,
+    /// How many background jobs (`/agents run`, `/background`) are
+    /// still running right now — shown in the header so their existence
+    /// is visible even with the Ctrl+B panel closed. See
+    /// `agent::background::BackgroundJobs::count_working`.
+    background_working: usize,
 }
 
 impl HeaderInfo {
@@ -183,6 +190,7 @@ impl HeaderInfo {
         self.terminal_auto = perms.allow_terminal;
         self.git_auto = perms.allow_git_write;
         self.accent = session.ui.accent.to_ratatui();
+        self.background_working = session.agent.background_jobs().count_working();
     }
 }
 
@@ -247,6 +255,17 @@ pub(crate) struct UiState {
     /// everything else it draws, rather than needing its own lock on the
     /// live `Arc<Mutex<TaskList>>`.
     tasks_snapshot: Vec<crate::tools::tasks::TaskItem>,
+    /// Mirrors `session.ui.agents_panel_visible`/`agents_panel_selected`
+    /// — see `sync_header`.
+    agents_panel_visible: bool,
+    agents_panel_selected: usize,
+    /// Defined personas (name, description), refreshed every
+    /// `sync_header` — the top section of the agents/background panel.
+    agents_personas: Vec<(String, String)>,
+    /// A snapshot of `Agent::background_jobs()`'s contents, same
+    /// refresh-on-`sync_header` tradeoff as `tasks_snapshot` — the
+    /// bottom section of the panel, newest job first.
+    background_snapshot: Vec<crate::agent::background::JobSnapshot>,
     scroll_step: u16,
     suggestion: &'static str,
 
@@ -309,6 +328,7 @@ impl TuiCore {
             terminal_auto: false,
             git_auto: false,
             accent: Color::Cyan,
+            background_working: 0,
         };
         header.sync(session);
 
@@ -336,6 +356,10 @@ impl TuiCore {
                 shell_mode: session.ui.shell_mode,
                 tasks_visible: session.ui.tasks_visible,
                 tasks_snapshot: Vec::new(),
+                agents_panel_visible: session.ui.agents_panel_visible,
+                agents_panel_selected: session.ui.agents_panel_selected,
+                agents_personas: Vec::new(),
+                background_snapshot: Vec::new(),
                 scroll_step: session.ui.scroll_step.max(1),
                 suggestion: pick_suggestion(),
                 help: None,
@@ -362,6 +386,21 @@ impl TuiCore {
         self.tasks_visible = session.ui.tasks_visible;
         if self.tasks_visible {
             self.tasks_snapshot = session.agent.tasks().lock().map(|t| t.items().to_vec()).unwrap_or_default();
+        }
+        self.agents_panel_visible = session.ui.agents_panel_visible;
+        self.agents_panel_selected = session.ui.agents_panel_selected;
+        if self.agents_panel_visible {
+            self.agents_personas = crate::agent::subagent::discover(session.agent.workspace())
+                .into_iter()
+                .map(|(name, persona)| (name, persona.description))
+                .collect();
+            self.background_snapshot = session.agent.background_jobs().snapshot();
+            let total_rows = self.agents_personas.len() + self.background_snapshot.len();
+            if total_rows > 0 {
+                self.agents_panel_selected = self.agents_panel_selected.min(total_rows - 1);
+            } else {
+                self.agents_panel_selected = 0;
+            }
         }
         self.scroll_step = session.ui.scroll_step.max(1);
         set_console_title(session);
@@ -802,13 +841,24 @@ impl TuiCore {
     /// here; see [`run_command`].
     fn run_captured(&mut self, session: &mut Session, name: &str, args: &[String]) -> CommandOutcome {
         output::begin_capture();
-        let result = commands::dispatch(session, name, args);
+        // Panic containment (see `agent::execute_tool_guarded`'s doc
+        // comment for the general rationale): a bug inside one command
+        // handler shouldn't take the whole session down, and — just as
+        // important here — `output::end_capture()` below must always run
+        // or stdout stays silently redirected into the capture buffer for
+        // the rest of the session, breaking every command after it even
+        // if the panic itself were survivable some other way.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| commands::dispatch(session, name, args)));
         let captured = output::end_capture();
 
         let outcome = match result {
-            Ok(outcome) => outcome,
-            Err(e) => {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(e)) => {
                 self.note(&format!("/{name} failed: {e}"), NoteLevel::Error);
+                CommandOutcome::Continue
+            }
+            Err(payload) => {
+                self.note(&format!("/{name} hit an internal error and was stopped: {}", panic_payload_message(&payload)), NoteLevel::Error);
                 CommandOutcome::Continue
             }
         };
@@ -1383,7 +1433,28 @@ async fn run_turn(ui: &mut TuiCore, session: &mut Session, text: &str) -> Result
 
     let started = Instant::now();
     let images = std::mem::take(&mut ui.pending_images);
-    match session.agent.respond_tui(&mut session.history, &augmented, images, ui).await {
+    // Panic containment around the whole turn, not just the tool-call
+    // layer `agent::execute_tool_guarded` already covers — a panic
+    // anywhere else in the request/streaming path (a malformed response
+    // from an unusual provider, say) gets the same treatment: reported as
+    // a failed turn, not a dead process. `catch_unwind` needs a
+    // `UnwindSafe` future; `respond_tui` borrows `session.history` and
+    // `ui` mutably across the `.await`, neither of which is left in a
+    // torn state a caller could observe incorrectly afterward (worst case
+    // is a partially-appended turn, already possible today via a plain
+    // `Err` return from this same call), so `AssertUnwindSafe` is the
+    // same judgment call as `execute_tool_guarded`'s.
+    let turn_result = {
+        use futures_util::FutureExt;
+        std::panic::AssertUnwindSafe(session.agent.respond_tui(&mut session.history, &augmented, images, ui))
+            .catch_unwind()
+            .await
+    };
+    let turn_result = match turn_result {
+        Ok(r) => r,
+        Err(payload) => Err(anyhow::anyhow!("turn hit an internal error and was stopped: {}", panic_payload_message(&payload))),
+    };
+    match turn_result {
         Ok(_answer) => {
             if session.ui.verbose {
                 ui.note(
@@ -1479,6 +1550,18 @@ async fn run_command(ui: &mut TuiCore, session: &mut Session, name: &str, args: 
         "agents" if args.first().map(String::as_str) == Some("run") => {
             return agents_run_cmd(ui, session, args).await;
         }
+        "agents" if args.is_empty() => {
+            session.ui.agents_panel_visible = !session.ui.agents_panel_visible;
+            ui.sync_header(session);
+            ui.draw()?;
+            return Ok(true);
+        }
+        "background" | "bg" => {
+            return background_run_cmd(ui, session, args).await;
+        }
+        "doctor" => {
+            return doctor_cmd(ui, session, args).await;
+        }
         "ide" if matches!(args.first().map(String::as_str), Some("start") | Some("stop") | Some("status")) => {
             return ide_live_cmd(ui, session, args).await;
         }
@@ -1505,17 +1588,50 @@ async fn run_command(ui: &mut TuiCore, session: &mut Session, name: &str, args: 
     Ok(outcome != CommandOutcome::Exit)
 }
 
-/// `/agents run <name> <task>` — the one `/agents` subcommand that does
-/// real model calls, so (like `/mcp connect`) it needs to be here rather
-/// than on `commands::agents_cmd`'s plain synchronous path. Runs
-/// non-interactively (`respond`'s headless loop, not `respond_tui`) —
-/// see [`crate::agent::subagent::run`] for why: no interactive prompt
-/// surface exists for a subagent's own tool calls, so anything needing
-/// approval is denied by default rather than hanging forever waiting
-/// for an answer nobody can give it. The subagent's result is appended
-/// to the *parent* conversation as an assistant-visible note, the same
-/// way a `btw` aside's answer stays visible without joining the next
-/// turn's context.
+/// Ctrl+X while the agents/background panel is open: acts on whichever
+/// row is selected. Personas (top section) are deleted outright — same
+/// as `/agents delete <name>`, just reachable without typing. Jobs
+/// (bottom section) are cancelled if still running, or removed from the
+/// list if already finished — never both in one keypress, so a job that
+/// was mid-run when Ctrl+X was pressed doesn't just vanish from view
+/// while still silently executing in the background.
+fn agents_panel_act_on_selected(ui: &mut TuiCore, session: &mut Session) {
+    let persona_count = ui.agents_personas.len();
+    let selected = session.ui.agents_panel_selected;
+
+    if selected < persona_count {
+        let Some((name, _)) = ui.agents_personas.get(selected).cloned() else { return };
+        match crate::agent::subagent::delete(session.agent.workspace(), &name) {
+            Ok(()) => ui.note(&format!("Deleted subagent '{name}'."), NoteLevel::Info),
+            Err(e) => ui.note(&format!("{e}"), NoteLevel::Error),
+        }
+    } else if let Some(job) = ui.background_snapshot.get(selected - persona_count).cloned() {
+        let jobs = session.agent.background_jobs();
+        if job.status == crate::agent::background::JobStatus::Working {
+            if jobs.cancel(job.id) {
+                ui.note(&format!("Cancelling job #{} — it'll stop at its next checkpoint, not instantly.", job.id), NoteLevel::Info);
+            }
+        } else if jobs.remove(job.id) {
+            ui.note(&format!("Removed job #{} from the list.", job.id), NoteLevel::Info);
+        }
+    }
+    ui.sync_header(session);
+}
+
+/// `/agents run <name> <task>` — starts `name` on `task` as a real
+/// background job (see `agent::background`) instead of blocking the
+/// parent session on it. Two v0.8 bugs drove this rewrite, not just the
+/// "give it its own panel" ask: blocking meant one slow/stuck subagent
+/// froze the whole TUI, and — the actual cause of the garbled output in
+/// bug reports — the old synchronous path ran through `subagent::run`,
+/// which writes raw, un-styled `println!`/spinner output straight to
+/// stdout; ratatui's alt-screen/raw-mode renderer has no idea that
+/// happened and its next redraw doesn't account for it, so the two
+/// fight over the same terminal cells. `subagent::run_silent` (what
+/// background jobs use) writes nothing to the terminal at all — the
+/// panel (Ctrl+B, or `/agents`/`/background` with no arguments) is the
+/// only way its progress or result becomes visible, rendered through
+/// ratatui like everything else.
 async fn agents_run_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
     let Some(name) = args.get(1).cloned() else {
         ui.note("Usage: /agents run <name> \"<task>\"  (see /agents list for defined personas)", NoteLevel::Warning);
@@ -1531,18 +1647,55 @@ async fn agents_run_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]
         return Ok(true);
     }
 
+    let id = session.agent.background_jobs().spawn(session.config.clone(), name.clone(), task.clone(), Some(persona));
     ui.push_user_prompt(&format!("/agents run {name} {task}"));
-    ui.note(&format!("Running '{name}' on its own task and context — this blocks until it finishes.", ), NoteLevel::Info);
+    ui.note(&format!("Started '{name}' as background job #{id} — open the panel with Ctrl+B (or /agents) to watch it."), NoteLevel::Info);
+    ui.sync_header(session);
     ui.draw()?;
+    Ok(true)
+}
 
-    match crate::agent::subagent::run(&session.config, &persona, &task, true, false).await {
-        Ok(result) => {
-            ui.note(&format!("[{name}] {result}"), NoteLevel::Info);
+/// `/doctor` — the same checks `rexo --doctor` runs on the command line
+/// (see `cli::doctor`), reachable without leaving the interactive
+/// session. Output goes through the same capture-then-note path
+/// `run_captured` uses for a plain synchronous command, since
+/// `doctor::run` prints with plain `println!` and this needs its result
+/// folded into the transcript instead of fighting ratatui for the raw
+/// terminal the way v0.8's `/agents run` used to.
+async fn doctor_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
+    let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+    output::begin_capture();
+    let exit = crate::cli::doctor::run(session.agent.workspace(), verbose).await;
+    let captured = output::end_capture();
+    ui.note(captured.trim_end(), if exit == 0 { NoteLevel::Info } else { NoteLevel::Warning });
+    ui.draw()?;
+    Ok(true)
+}
+
+/// `/background <task>` (alias `/bg`) — the same background-job
+/// machinery as `/agents run`, minus a persona: runs with the session's
+/// own default system prompt, same provider/config/workspace. This is
+/// the command described in the help screen since v0.6 as "Send this
+/// session to the background" and stubbed (`Status::Planned`) ever
+/// since — see `agent::background` for what's actually real about it
+/// and what still isn't (mid-request cancellation, workspace isolation
+/// between concurrent jobs).
+async fn background_run_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) -> Result<bool> {
+    let task = args.join(" ");
+    if task.trim().is_empty() {
+        let jobs = session.agent.background_jobs();
+        if jobs.snapshot().is_empty() {
+            ui.note("Usage: /background <task> — starts it running without blocking this session. No jobs yet; opening the panel.", NoteLevel::Info);
         }
-        Err(e) => {
-            ui.note(&format!("Subagent '{name}' failed: {e}"), NoteLevel::Error);
-        }
+        session.ui.agents_panel_visible = true;
+        ui.sync_header(session);
+        ui.draw()?;
+        return Ok(true);
     }
+
+    let id = session.agent.background_jobs().spawn(session.config.clone(), "background".to_string(), task.clone(), None);
+    ui.push_user_prompt(&format!("/background {task}"));
+    ui.note(&format!("Started background job #{id} — open the panel with Ctrl+B (or /background with no arguments) to watch it."), NoteLevel::Info);
     ui.sync_header(session);
     ui.draw()?;
     Ok(true)
@@ -1645,6 +1798,19 @@ async fn mcp_live_cmd(ui: &mut TuiCore, session: &mut Session, args: &[String]) 
 /// read, etc. work exactly as they would outside a TUI at all), then
 /// return. See the module docs for why this exists instead of a fully
 /// raw-mode-safe reimplementation of every interactive prompt.
+/// Extract a human-readable message from a caught panic payload
+/// (`Box<dyn Any + Send>`), the same fallback chain
+/// `agent::execute_tool_guarded` uses: `&str` (the common case — a
+/// `panic!("...")` literal or an `.expect("...")` message), then `String`,
+/// then an honest "no message" rather than guessing.
+fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no panic message available".to_string())
+}
+
 fn run_suspended(ui: &mut TuiCore, session: &mut Session, name: &str, args: &[String]) -> Result<CommandOutcome> {
     use std::io::Write as _;
 
@@ -1667,7 +1833,18 @@ fn run_suspended(ui: &mut TuiCore, session: &mut Session, name: &str, args: &[St
     // both here and once we're back in raw mode below.
     ui.events = EventStream::new();
 
-    let outcome = commands::dispatch(session, name, args);
+    // Panic containment, same reasoning as `run_captured` — and the
+    // specific bug this was written for: a workspace change (or any other
+    // `needs_terminal` command) panicking here used to unwind straight
+    // through this function, past `run_command`, and out of `main` — the
+    // top-level panic hook in `run()` would restore the terminal (raw
+    // mode off, alt screen left) but the *process* still exited, which is
+    // exactly the "type `rexo`, it dies, type `rexo` again" loop from the
+    // v0.8 workspace-change reports. Catching it here means the command
+    // fails loudly in the transcript and the session — and the terminal
+    // handoff below, which must always run or raw mode stays disabled for
+    // the rest of the session — carries on regardless.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| commands::dispatch(session, name, args)));
     print!("\n{}", "── press Enter to return to REXO ──".to_string());
     io::stdout().flush().ok();
     let mut discard = String::new();
@@ -1679,9 +1856,13 @@ fn run_suspended(ui: &mut TuiCore, session: &mut Session, name: &str, args: &[St
     ui.terminal.clear()?;
 
     match outcome {
-        Ok(o) => Ok(o),
-        Err(e) => {
+        Ok(Ok(o)) => Ok(o),
+        Ok(Err(e)) => {
             ui.note(&format!("/{name} failed: {e}"), NoteLevel::Error);
+            Ok(CommandOutcome::Continue)
+        }
+        Err(payload) => {
+            ui.note(&format!("/{name} hit an internal error and was stopped: {}", panic_payload_message(&payload)), NoteLevel::Error);
             Ok(CommandOutcome::Continue)
         }
     }
@@ -1875,6 +2056,14 @@ async fn connect_custom_interactive(ui: &mut TuiCore, session: &mut Session) -> 
         return Ok(Some("A base URL is required — cancelled.".to_string()));
     }
 
+    // Which wire format this endpoint actually speaks — asked explicitly
+    // rather than assumed, since "OpenAI-compatible" silently guessed
+    // wrong for a native Anthropic- or Gemini-shaped endpoint (a
+    // self-hosted proxy in front of either, say) used to be a confusing
+    // 401/400 with no clue why. Shared with the first-launch wizard's
+    // own custom-endpoint path — see `wizard::ask_wire_format`.
+    let kind = crate::cli::wizard::ask_wire_format(&mut ui.terminal, &mut ui.events, accent).await?;
+
     let requires_key = picker::run_confirm(&mut ui.terminal, &mut ui.events, &name, "Does this endpoint require an API key?", true, accent).await?;
     let mut api_key = None;
     if requires_key {
@@ -1889,7 +2078,7 @@ async fn connect_custom_interactive(ui: &mut TuiCore, session: &mut Session) -> 
 
     let profile = crate::config::global::ProviderProfile {
         display_name: name.clone(),
-        kind: "openai_compatible".to_string(),
+        kind,
         base_url: Some(base_url),
         model,
         temperature: None,
@@ -2167,7 +2356,33 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
     ui.refresh_autocomplete(session);
     loop {
         ui.draw()?;
-        match ui.events.next().await {
+
+        // Background jobs (`/agents run`, `/background`) run on their own
+        // tokio tasks and update their status independently of anything
+        // the user types — without this, a job finishing while the user
+        // is simply idle (not pressing a key) would sit stale in the
+        // panel until the next keystroke happened to trigger a redraw;
+        // "check back on it later" wouldn't actually show anything new
+        // if "later" means "before you touch the keyboard again". Only
+        // armed when there's something worth refreshing for — a job
+        // actually running, or either panel open — so an idle session
+        // with nothing in flight still blocks purely on
+        // `ui.events.next()` rather than waking up 1.4x/sec for no
+        // reason.
+        let should_poll = session.ui.tasks_visible || session.ui.agents_panel_visible || session.agent.background_jobs().count_working() > 0;
+        let event = if should_poll {
+            tokio::select! {
+                ev = ui.events.next() => ev,
+                _ = tokio::time::sleep(Duration::from_millis(700)) => {
+                    ui.sync_header(session);
+                    continue;
+                }
+            }
+        } else {
+            ui.events.next().await
+        };
+
+        match event {
             Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
                 if is_ctrl_c(&key) {
                     if ui.input.is_empty() {
@@ -2297,6 +2512,24 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
                         session.ui.tasks_visible = !session.ui.tasks_visible;
                         ui.sync_header(session);
                     }
+                    // Ctrl+B: toggle the agents/background panel — defined
+                    // personas plus every `/agents run`/`/background` job,
+                    // live or finished. See `render::draw_agents_panel`.
+                    KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        session.ui.agents_panel_visible = !session.ui.agents_panel_visible;
+                        ui.sync_header(session);
+                    }
+                    // While the agents/background panel is open, Ctrl+X
+                    // acts on the selected row: cancels it if still
+                    // running, removes it from the list if finished. A
+                    // plain 'x'/Delete is deliberately *not* used for
+                    // this — the input box keeps receiving normal
+                    // characters while the panel is open (same as the
+                    // Ctrl+T tasks panel), so only a modifier combo is
+                    // safe to repurpose here.
+                    KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) && session.ui.agents_panel_visible => {
+                        agents_panel_act_on_selected(ui, session);
+                    }
                     // Ctrl+O: toggle verbose turn-level diagnostics.
                     KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         session.ui.verbose = !session.ui.verbose;
@@ -2339,6 +2572,17 @@ async fn read_input(ui: &mut TuiCore, session: &mut Session) -> Result<Option<St
                             accept_autocomplete(ui, name);
                             ui.refresh_autocomplete(session);
                         }
+                    }
+                    KeyCode::Up if session.ui.agents_panel_visible => {
+                        session.ui.agents_panel_selected = session.ui.agents_panel_selected.saturating_sub(1);
+                        ui.sync_header(session);
+                    }
+                    KeyCode::Down if session.ui.agents_panel_visible => {
+                        let total = ui.agents_personas.len() + ui.background_snapshot.len();
+                        if total > 0 && session.ui.agents_panel_selected + 1 < total {
+                            session.ui.agents_panel_selected += 1;
+                        }
+                        ui.sync_header(session);
                     }
                     KeyCode::Up if !candidates.is_empty() => {
                         ui.autocomplete_selected = ui.autocomplete_selected.saturating_sub(1);

@@ -53,6 +53,7 @@ use crate::tools::{self, ToolContext, ToolPermission, ToolRegistry};
 use crate::{tprint as print, tprintln as println};
 
 pub use tui_support::{AgentUi, NoteLevel, StreamQueue};
+pub mod background;
 mod tui_support;
 
 // Phases of a single model turn's output, tracked so the streaming printer
@@ -94,6 +95,13 @@ pub struct Agent {
     /// The running `/ide` server, if `/ide start` has been run this
     /// session — see [`Agent::start_ide`]/[`Agent::stop_ide`].
     ide_server: Option<crate::ide::IdeServer>,
+    /// Real background jobs — `/background` and non-blocking `/agents
+    /// run` both spawn into this; the TUI's background panel reads a
+    /// snapshot of it. See [`background`] for why this exists at all
+    /// (v0.8's `/background` was a `Status::Planned` stub) and what it
+    /// doesn't cover yet (mid-request cancellation, workspace isolation
+    /// between concurrent jobs).
+    background: background::SharedBackgroundJobs,
 }
 
 /// What a file looked like immediately before a mutating tool call, so
@@ -195,9 +203,7 @@ impl Agent {
     /// into. Rejects a directory that doesn't exist, isn't a directory,
     /// or is already the workspace/an existing root.
     pub fn add_read_root(&mut self, path: std::path::PathBuf) -> Result<std::path::PathBuf> {
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| anyhow::anyhow!("Can't add '{}': {e}", path.display()))?;
+        let canonical = crate::utils::real_path(&path).map_err(|e| anyhow::anyhow!("Can't add '{}': {e}", path.display()))?;
         if !canonical.is_dir() {
             anyhow::bail!("'{}' isn't a directory.", canonical.display());
         }
@@ -212,7 +218,7 @@ impl Agent {
     }
 
     pub fn remove_read_root(&mut self, path: &std::path::Path) -> bool {
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = crate::utils::real_path(path).unwrap_or_else(|_| path.to_path_buf());
         let before = self.tool_ctx.extra_read_roots.len();
         self.tool_ctx.extra_read_roots.retain(|p| p != &canonical);
         self.tool_ctx.extra_read_roots.len() != before
@@ -450,7 +456,7 @@ impl Agent {
             return format!("Blocked by a pre_tool hook: {reason}");
         }
 
-        let result = match tool.execute(&self.tool_ctx, args.clone()).await {
+        let result = match execute_tool_guarded(tool.as_ref(), &self.tool_ctx, args.clone()).await {
             Ok(output) => {
                 print_tool_result(&call.name, &output);
                 output
@@ -462,6 +468,123 @@ impl Agent {
         };
         self.run_post_tool_hooks(&call.name, &args, &result);
         result
+    }
+
+    /// Same control flow as `execute_tool_call` — permission check, pre/
+    /// post hooks, panic-guarded execution — with every `println!`/
+    /// `print_result_line` removed. Used by `agent_loop_silent`, which
+    /// exists precisely because nothing in a background job's call chain
+    /// may write to the real terminal (see `subagent::run_silent`'s doc
+    /// comment for why that's not just tidiness).
+    async fn execute_tool_call_silent(&mut self, call: &ToolCall) -> String {
+        let args = parse_tool_arguments(&call.arguments);
+
+        let tool = match self.registry.require(&call.name) {
+            Ok(t) => t,
+            Err(e) => return e.to_string(),
+        };
+
+        match tool.required_permission(&self.tool_ctx, &args) {
+            ToolPermission::Automatic => {}
+            ToolPermission::Denied { reason } => {
+                return format!("Blocked by policy: {reason}");
+            }
+            ToolPermission::Ask { summary, risk } => {
+                let kind = permission_kind_for(&call.name);
+                match self.permissions.check(kind, &summary, risk) {
+                    // `self.permissions` was built with `non_interactive:
+                    // true`, so `Ok(Decision::Allowed)` here only happens
+                    // for something already pre-approved (e.g. a
+                    // `[permissions]` config rule) — never an interactive
+                    // prompt, since there's no terminal to prompt on.
+                    Ok(Decision::Allowed) => {}
+                    Ok(Decision::Denied) => {
+                        return format!(
+                            "Denied: '{summary}' needs approval, and background jobs run \
+                             non-interactively with no one to ask — it was refused automatically. \
+                             Avoid actions that need approval, or run this in the foreground instead."
+                        );
+                    }
+                    Err(e) => return format!("Permission check failed: {e}"),
+                }
+            }
+        }
+
+        if let Err(reason) = self.run_pre_tool_hooks(&call.name, &args) {
+            return format!("Blocked by a pre_tool hook: {reason}");
+        }
+
+        let result = match execute_tool_guarded(tool.as_ref(), &self.tool_ctx, args.clone()).await {
+            Ok(output) => output,
+            Err(e) => format!("Error: {e}"),
+        };
+        self.run_post_tool_hooks(&call.name, &args, &result);
+        result
+    }
+
+    /// The background-job loop: identical shape to `agent_loop` (same
+    /// `max_iterations`/`max_tool_calls` bounds, same tool-call dispatch)
+    /// but calling the provider directly instead of through
+    /// `stream_turn` — no streaming printer, no spinner, and critically
+    /// no `tokio::signal::ctrl_c()` listener, so this job doesn't die the
+    /// instant the user hits Ctrl+C in the foreground session for an
+    /// unrelated reason. `cancel` is checked at every iteration boundary
+    /// (before the next model request, and before each tool call within
+    /// a turn) — cooperative, not preemptive, so a job already inside an
+    /// in-flight request finishes that request first (see this module's
+    /// docs on `background`).
+    async fn agent_loop_silent(&mut self, history: &mut Vec<ChatMessage>, cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<String> {
+        let tool_defs = self.registry.tool_definitions();
+        let mut tool_call_count = 0usize;
+
+        for _iteration in 0..self.max_iterations {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok("Cancelled before the next model request.".to_string());
+            }
+
+            let result = self.provider.chat(history, &tool_defs, None).await?;
+
+            if result.tool_calls.is_empty() {
+                let content = result.content.clone().unwrap_or_default();
+                history.push(ChatMessage::assistant(result.content, result.reasoning, Vec::new()));
+                return Ok(content);
+            }
+
+            history.push(ChatMessage::assistant(result.content.clone(), result.reasoning.clone(), result.tool_calls.clone()));
+
+            for call in &result.tool_calls {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    let msg = "Cancelled.".to_string();
+                    history.push(ChatMessage::tool_result(call.id.clone(), call.name.clone(), msg.clone()));
+                    return Ok(msg);
+                }
+
+                tool_call_count += 1;
+                if tool_call_count > self.max_tool_calls {
+                    let msg = format!(
+                        "Tool call budget exceeded ({} calls this turn). Stopping for safety.",
+                        self.max_tool_calls
+                    );
+                    history.push(ChatMessage::tool_result(call.id.clone(), call.name.clone(), msg.clone()));
+                    return Ok(msg);
+                }
+
+                let outcome = self.execute_tool_call_silent(call).await;
+                history.push(ChatMessage::tool_result(call.id.clone(), call.name.clone(), outcome));
+            }
+        }
+
+        Ok(format!(
+            "Reached the maximum of {} model turns without a final answer. Stopping for safety.",
+            self.max_iterations
+        ))
+    }
+
+    /// Entry point for a background job — see `agent_loop_silent` and
+    /// `subagent::run_silent`, which is what actually calls this.
+    pub async fn respond_silent(&mut self, history: &mut Vec<ChatMessage>, user_message: &str, cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<String> {
+        history.push(ChatMessage::user(user_message));
+        self.agent_loop_silent(history, cancel).await
     }
 
     // ---- TUI counterparts -------------------------------------------
@@ -670,7 +793,7 @@ impl Agent {
         let mutating = matches!(call.name.as_str(), "edit_file" | "create_file" | "delete_file");
         let pre_snapshot = if mutating { self.snapshot_before_mutation(&args) } else { None };
 
-        let outcome = match tool.execute(&self.tool_ctx, args.clone()).await {
+        let outcome = match execute_tool_guarded(tool.as_ref(), &self.tool_ctx, args.clone()).await {
             Ok(output) => {
                 apply_tool_result_tui(ui, &call.name, &output);
                 output
@@ -762,6 +885,13 @@ impl Agent {
     /// model sees and edits, not a snapshot that can drift from it.
     pub fn tasks(&self) -> Arc<Mutex<tools::tasks::TaskList>> {
         self.tasks.clone()
+    }
+
+    /// The background-jobs registry — see [`background`]. Cloning is
+    /// cheap (it's an `Arc`), and the clone stays live and shared with
+    /// every job already spawned even after this call returns.
+    pub fn background_jobs(&self) -> background::SharedBackgroundJobs {
+        self.background.clone()
     }
 
     pub fn hooks(&self) -> &[crate::hooks::HookDef] {
@@ -995,6 +1125,38 @@ fn str_arg(args: &serde_json::Value, key: &str) -> String {
     }
 }
 
+/// Run a tool's `execute` with panic containment. A bug inside one tool
+/// implementation — a bad index, an `.unwrap()` on input the model sent
+/// that turned out to be malformed — used to unwind straight past the
+/// agent loop, past `run_command`/`run_turn` in the TUI, and out of
+/// `main`, killing the whole session (this is one root cause behind the
+/// "the loop broke" class of v0.8 reports: not every crash was actually
+/// in workspace/path handling specifically, some were just *some* panic,
+/// anywhere in a tool call, with nothing to stop it). Converting it into
+/// an `Err` here means the model gets a normal tool-failure message and
+/// can react (try something else, tell the user, stop) exactly like any
+/// other tool error — the session survives instead of the process dying.
+/// `AssertUnwindSafe` is safe here specifically because nothing this
+/// wraps keeps a lock held across the boundary that another thread could
+/// observe half-updated afterward: `ToolContext` and `arguments` are
+/// plain data, and any `Mutex` a tool implementation touches internally
+/// (e.g. `tools::tasks::TaskList`) already has to tolerate a poisoned
+/// lock from *some* panicking holder, unwind-caught or not.
+async fn execute_tool_guarded(tool: &dyn tools::Tool, ctx: &tools::ToolContext, arguments: serde_json::Value) -> Result<String> {
+    use futures_util::FutureExt;
+    match std::panic::AssertUnwindSafe(tool.execute(ctx, arguments)).catch_unwind().await {
+        Ok(result) => result,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no panic message available".to_string());
+            Err(anyhow::anyhow!("tool implementation panicked: {msg}"))
+        }
+    }
+}
+
 /// Claude-Code-style one-line call summary, e.g. `Read(src/main.rs)` or
 /// `Bash(cargo test)`, instead of the raw tool name + JSON arguments.
 fn friendly_call(tool_name: &str, args: &serde_json::Value) -> String {
@@ -1126,6 +1288,7 @@ fn assemble_agent(config: &Config, provider: Box<dyn Provider>, non_interactive:
         hooks: crate::hooks::load(&config.workspace),
         mcp_clients: std::collections::HashMap::new(),
         ide_server: None,
+        background: Arc::new(background::BackgroundJobs::default()),
     };
 
     let history = vec![ChatMessage::system(system_prompt(&config.workspace))];
@@ -1143,4 +1306,85 @@ fn system_prompt(workspace: &Path) -> String {
     };
     let project_context = context::build(workspace);
     prompts::system_prompt(workspace, os_name, &project_context)
+}
+
+#[cfg(test)]
+mod panic_containment_tests {
+    //! Regression coverage for `execute_tool_guarded` — the fix for the
+    //! v0.8 class of bug where any panic inside a tool implementation
+    //! (not just the path-handling ones the workspace-change reports
+    //! surfaced) unwound straight past the agent loop and killed the
+    //! whole process. A deliberately-panicking fake `Tool` is the only
+    //! way to actually exercise the `catch_unwind` boundary rather than
+    //! just reading the code and trusting it's wired up correctly.
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+
+    use super::execute_tool_guarded;
+    use crate::tools::{Tool, ToolContext, ToolPermission};
+
+    struct PanickyTool;
+
+    #[async_trait]
+    impl Tool for PanickyTool {
+        fn name(&self) -> &str {
+            "panicky_tool"
+        }
+        fn description(&self) -> &str {
+            "A tool that panics, for testing panic containment."
+        }
+        fn schema(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        fn required_permission(&self, _ctx: &ToolContext, _arguments: &Value) -> ToolPermission {
+            ToolPermission::Automatic
+        }
+        async fn execute(&self, _ctx: &ToolContext, _arguments: Value) -> anyhow::Result<String> {
+            panic!("boom: simulated bug inside a tool implementation");
+        }
+    }
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            workspace: std::env::temp_dir(),
+            extra_read_roots: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_tool_becomes_an_error_not_a_crash() {
+        let tool = PanickyTool;
+        // The critical assertion: this call returns instead of unwinding
+        // out of the test. Before the fix, this test would abort the
+        // whole test binary (a caught, expected panic still prints to
+        // stderr — that's fine and matches real REXO's behavior of
+        // surfacing the panic message in the transcript).
+        let result = execute_tool_guarded(&tool, &ctx(), json!({})).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("panicked"), "expected a panic-shaped error, got: {msg}");
+        assert!(msg.contains("boom"), "expected the original panic message preserved, got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn a_well_behaved_tool_is_unaffected_by_the_panic_wrapper() {
+        struct FineTool;
+        #[async_trait]
+        impl Tool for FineTool {
+            fn name(&self) -> &str {
+                "fine_tool"
+            }
+            fn description(&self) -> &str {
+                "ok"
+            }
+            fn schema(&self) -> Value {
+                json!({})
+            }
+            async fn execute(&self, _ctx: &ToolContext, _arguments: Value) -> anyhow::Result<String> {
+                Ok("all good".to_string())
+            }
+        }
+        let result = execute_tool_guarded(&FineTool, &ctx(), json!({})).await;
+        assert_eq!(result.unwrap(), "all good");
+    }
 }

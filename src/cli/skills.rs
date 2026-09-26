@@ -59,6 +59,14 @@ pub fn discover(workspace: &Path) -> Vec<Skill> {
     out
 }
 
+/// A skill body beyond this is truncated with a note rather than
+/// injected whole — a huge `SKILL.md` (someone pastes in a full API
+/// reference, say) would otherwise blow a big chunk of the context
+/// budget on every single trigger, which is exactly what "make skill
+/// loading lazy" is trying to avoid in the first place: on-demand
+/// injection only helps if what gets injected is actually bounded.
+const MAX_SKILL_BODY_CHARS: usize = 8_000;
+
 fn collect_from(dir: &Path, project: bool, out: &mut Vec<Skill>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -75,11 +83,18 @@ fn collect_from(dir: &Path, project: bool, out: &mut Vec<Skill>) {
             .get("description")
             .map(str::to_string)
             .unwrap_or_else(|| fm.body.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_string());
+        let triggers = fm.list("triggers");
+        let body = if fm.body.chars().count() > MAX_SKILL_BODY_CHARS {
+            let truncated: String = fm.body.chars().take(MAX_SKILL_BODY_CHARS).collect();
+            format!("{truncated}\n\n[…truncated — this SKILL.md is over {MAX_SKILL_BODY_CHARS} characters; trim it so the whole thing fits when triggered.]")
+        } else {
+            fm.body
+        };
         out.push(Skill {
             name,
             description,
-            triggers: fm.list("triggers"),
-            body: fm.body,
+            triggers,
+            body,
             project,
             path: skill_md,
         });
@@ -137,6 +152,20 @@ mod tests {
     fn no_skill_dir_is_not_an_error() {
         let tmp = tempfile();
         assert!(super::discover(&tmp).is_empty());
+    }
+
+    #[test]
+    fn an_oversized_skill_body_is_truncated_with_a_note() {
+        let tmp = tempfile();
+        let skills_dir = tmp.join(".rexo").join("skills");
+        let huge_body = "x".repeat(MAX_SKILL_BODY_CHARS + 500);
+        write_skill(&skills_dir, "huge", &format!("---\nname: huge\ndescription: a big one\n---\n{huge_body}"));
+
+        let found = super::discover(&tmp);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].body.len() < huge_body.len());
+        assert!(found[0].body.contains("truncated"));
+        fs::remove_dir_all(&tmp).ok();
     }
 
     fn tempfile() -> PathBuf {

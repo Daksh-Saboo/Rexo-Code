@@ -2,19 +2,23 @@
 //! a bounded task to completion using the same provider/config/tools as
 //! the parent session, then reports back a result.
 //!
-//! Sequential, not concurrent: `run` reuses [`Agent::bootstrap`] plus the
-//! existing headless [`Agent::respond`] loop rather than a second
-//! execution thread, so there's no git-worktree isolation and no
-//! background execution here — running a subagent blocks the parent
-//! session on it, same as any other turn. Concurrent/backgrounded
-//! subagents with workspace isolation remain the bigger item on the
-//! roadmap (they need the git-worktree layer this doesn't have). What's
-//! real here: defining a persona, running it against a genuine task with
-//! its own tool-use loop, its own bounded iteration count, and its own
-//! conversation entirely separate from the parent's, and getting an
-//! actual result back — not a stub.
+//! As of v0.9, `/agents run` always runs as a real background job (see
+//! [`crate::agent::background`]) rather than blocking the parent
+//! session — [`run_silent`] is genuinely concurrent with whatever the
+//! parent session does next, not sequential. What's still not here:
+//! git-worktree isolation between jobs, so two jobs (or a job and the
+//! parent session) editing overlapping files in the same workspace can
+//! race each other exactly like two humans editing the same repo at
+//! once would. That isolation layer remains the one clear item carried
+//! forward on the roadmap. What's real: defining a persona, running it
+//! against a genuine task with its own tool-use loop, its own bounded
+//! iteration count, and its own conversation entirely separate from the
+//! parent's, actually running concurrently, and getting a real result
+//! back — not a stub.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -77,6 +81,18 @@ pub fn create(workspace: &Path, name: &str, description: &str) -> Result<PathBuf
     Ok(path)
 }
 
+/// Delete a persona file. Only ever touches `.rexo/agents/<name>.toml`
+/// itself — never anything a job that ran under that persona may have
+/// created or edited in the workspace — mirroring the precision
+/// `/plugin disable` already holds itself to for what it reverses.
+pub fn delete(workspace: &Path, name: &str) -> Result<()> {
+    let path = agents_dir(workspace).join(format!("{name}.toml"));
+    if !path.exists() {
+        anyhow::bail!("no subagent named '{name}'");
+    }
+    std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))
+}
+
 /// Run `task` through a fresh, persona-configured `Agent` to completion.
 /// Reuses the parent's `config` (same provider, model, credentials, tool
 /// permissions) but starts an entirely new conversation seeded with the
@@ -86,15 +102,41 @@ pub fn create(workspace: &Path, name: &str, description: &str) -> Result<PathBuf
 /// `max_iterations`/`max_tool_calls` any `Agent` has, so a runaway
 /// subagent can't loop forever any more than a runaway top-level turn
 /// can.
-pub async fn run(config: &Config, persona: &SubagentPersona, task: &str, non_interactive: bool, auto_approve: bool) -> Result<String> {
-    let api_key = config.api_key().unwrap_or_default(); // some providers (local servers, etc.) need none at all — same as the top-level bootstrap path
-    let (mut sub_agent, mut history) = crate::agent::Agent::bootstrap(config, api_key, non_interactive, auto_approve).context("couldn't start the subagent")?;
-    if let Some(first) = history.first_mut() {
-        if first.role == Role::System {
-            *first = ChatMessage::system(persona.system_prompt.clone());
+/// The background-job counterpart of persona-based subagent execution —
+/// see [`crate::agent::Agent::respond_silent`] for why this is the only
+/// execution path now (foreground and backgrounded both), not one of
+/// two: `respond`'s loop (`stream_turn`) writes raw ANSI (spinner
+/// frames, streamed tokens) straight to stdout and listens for `Ctrl+C`
+/// process-wide — both correct for a genuinely foreground, blocking call
+/// with nothing else on the terminal, and both wrong for something
+/// running *while the TUI owns the real terminal*. The former was the
+/// actual root cause of `/agents run`'s garbled v0.8 output (two
+/// independent writers hitting the same terminal, interleaved — the
+/// ratatui redraw loop and this call's raw `println!`s); the latter
+/// would make every background job die together the instant the user
+/// hits Ctrl+C for an unrelated reason in the foreground session.
+/// `persona: None` runs with the parent config's own default system
+/// prompt (used by plain `/background <task>`, no persona involved)
+/// instead of a persona's.
+pub async fn run_silent(config: &Config, persona: Option<&SubagentPersona>, task: &str, cancel: Arc<AtomicBool>) -> Result<String> {
+    let api_key = config.api_key().unwrap_or_default();
+    // Always non-interactive + never auto-approve: a background job has
+    // no one to ask, so anything gated behind `ToolPermission::Ask` is
+    // refused with an explanation instead of either hanging forever
+    // waiting for an answer nobody can give it, or silently doing
+    // something the user never actually approved. Automatic-permission
+    // tools (read_file, list_files, safe git status, etc.) still run
+    // freely — plenty of useful autonomous work (research, planning,
+    // read-heavy multi-step tasks) never needs more than that.
+    let (mut sub_agent, mut history) = crate::agent::Agent::bootstrap(config, api_key, true, false).context("couldn't start the background job")?;
+    if let Some(persona) = persona {
+        if let Some(first) = history.first_mut() {
+            if first.role == Role::System {
+                *first = ChatMessage::system(persona.system_prompt.clone());
+            }
         }
     }
-    sub_agent.respond(&mut history, task).await
+    sub_agent.respond_silent(&mut history, task, &cancel).await
 }
 
 #[cfg(test)]
@@ -134,6 +176,24 @@ mod tests {
         create(&ws, "tester", "writing unit tests").unwrap();
         let persona = load(&ws, "tester").unwrap();
         assert_eq!(persona.description, "writing unit tests");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn delete_removes_a_persona_so_discover_no_longer_finds_it() {
+        let ws = temp_workspace();
+        create(&ws, "reviewer", "reviewing code").unwrap();
+        assert_eq!(discover(&ws).len(), 1);
+        delete(&ws, "reviewer").unwrap();
+        assert!(discover(&ws).is_empty());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn delete_reports_a_clear_error_for_an_unknown_persona() {
+        let ws = temp_workspace();
+        let err = delete(&ws, "nobody").unwrap_err();
+        assert!(err.to_string().contains("no subagent named"));
         let _ = std::fs::remove_dir_all(&ws);
     }
 }

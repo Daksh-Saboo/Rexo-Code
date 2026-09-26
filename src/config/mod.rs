@@ -220,6 +220,11 @@ impl Config {
             "nvidia" => "NVIDIA_API_KEY",
             "openai_compatible" => "OPENAI_API_KEY",
             "local" => "LOCAL_API_KEY",
+            // Not a REXO-invented name — the same env var Anthropic's own
+            // SDKs and CLI tools already read, so a key someone has set
+            // for other Anthropic tooling just works here too, no
+            // REXO_-namespaced var required.
+            "anthropic" => "ANTHROPIC_API_KEY",
             _ => "REXO_API_KEY",
         }
     }

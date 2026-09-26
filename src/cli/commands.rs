@@ -502,12 +502,22 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "background",
         aliases: &["bg"],
-        description: "Send this session to the background",
-        usage: "/background",
+        description: "Run a task as a background job without blocking this session — no arguments opens the panel (Ctrl+B)",
+        usage: "/background [<task>]",
         hidden: false,
         needs_terminal: false,
-        status: Status::Planned,
+        status: Status::Ready,
         handler: background_cmd,
+    },
+    CommandSpec {
+        name: "doctor",
+        aliases: &[],
+        description: "Diagnose this installation — config, provider, MCP, skills, permissions, network, git",
+        usage: "/doctor [--verbose]",
+        hidden: false,
+        needs_terminal: false,
+        status: Status::Ready,
+        handler: doctor_cmd_sync,
     },
     CommandSpec {
         name: "mcp",
@@ -552,8 +562,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "agents",
         aliases: &[],
-        description: "Define personas and run them against a task (sequential, not concurrent)",
-        usage: "/agents [list|create <name> \"<desc>\"|run <name> \"<task>\"]",
+        description: "Define personas and run them as background jobs — no arguments opens the panel (Ctrl+B)",
+        usage: "/agents [list|create <name> \"<desc>\"|delete <name>|run <name> \"<task>\"]",
         hidden: false,
         needs_terminal: false,
         status: Status::Ready,
@@ -1579,13 +1589,13 @@ fn suggest_workspaces(current: &Path, filter: Option<&str>) -> Vec<PathBuf> {
 
 fn apply_workspace_change(session: &mut Session, requested: PathBuf) -> Result<()> {
     let resolved = if requested.exists() {
-        requested.canonicalize().unwrap_or(requested.clone())
+        crate::utils::real_path(&requested).unwrap_or(requested.clone())
     } else {
         println!("{} does not exist.", requested.display());
         let answer = prompt_line("Create it? [y/N] ")?;
         if answer.trim().eq_ignore_ascii_case("y") {
             std::fs::create_dir_all(&requested)?;
-            requested.canonicalize().unwrap_or(requested)
+            crate::utils::real_path(&requested).unwrap_or(requested)
         } else {
             println!("Workspace unchanged.");
             return Ok(());
@@ -2661,6 +2671,12 @@ fn feedback_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome
 // README.md's roadmap.
 // ---------------------------------------------------------------------
 
+/// Every command that used this in v0.8 (`/mcp`, `/hooks`, `/ide`,
+/// `/plugin`, `/agents`, `/background`) is real as of v0.9 — kept
+/// (rather than deleted) as ready-made infrastructure for whatever
+/// lands on the roadmap next and needs an honest "not implemented yet"
+/// instead of silently doing nothing or erroring as "unknown command".
+#[allow(dead_code)]
 fn not_yet(name: &str, what: &str) -> Result<CommandOutcome> {
     println!("{} {} isn't implemented yet.", "○".dimmed(), name.bold());
     println!("{}", format!("  ({what} — tracked on the roadmap in README.md.)").dimmed());
@@ -2862,8 +2878,43 @@ fn list_saved_sessions(session: &Session) {
     println!("{}", "Resume with /resume <name>, save the current one with /resume save <name>.".dimmed());
 }
 
-fn background_cmd(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
-    not_yet("/background", "sending this session to the background")
+fn background_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
+    if !args.is_empty() {
+        println!("{} /background <task> needs the interactive session (it does real model calls) — this is the plain-text listing only.", "✗".red());
+        return Ok(CommandOutcome::Continue);
+    }
+    println!("{}", "Background jobs".bold());
+    println!("{}", "─".repeat(48).dimmed());
+    let jobs = session.agent.background_jobs().snapshot();
+    if jobs.is_empty() {
+        println!("{}", "None yet. Start one with /background \"<task>\" (interactive session only).".dimmed());
+    } else {
+        for job in &jobs {
+            let marker = match job.status {
+                crate::agent::background::JobStatus::Working => "●".yellow(),
+                crate::agent::background::JobStatus::Done => "●".green(),
+                crate::agent::background::JobStatus::Failed => "●".red(),
+                crate::agent::background::JobStatus::Cancelled => "●".dimmed(),
+            };
+            println!("{marker} #{} [{}] {} — {}", job.id, job.label, job.status.label(), job.task);
+        }
+    }
+    Ok(CommandOutcome::Continue)
+}
+
+/// The plain-dispatch fallback for `/doctor` — only reached from a
+/// non-interactive context, since the interactive session intercepts
+/// `/doctor` earlier (see `tui::doctor_cmd`) to run the real async
+/// checks (DNS resolution needs an executor to await on, which a
+/// synchronous command handler doesn't have without either requiring a
+/// multi-threaded Tokio runtime specifically or risking the classic
+/// block-on-inside-an-async-task deadlock on a single-threaded one —
+/// not a tradeoff worth making for a diagnostic command that already
+/// has a perfectly good synchronous entry point).
+fn doctor_cmd_sync(_session: &mut Session, _args: &[String]) -> Result<CommandOutcome> {
+    println!("{} /doctor's full checks need the interactive session.", "✗".red());
+    println!("{}", "  Run `rexo doctor` (or `rexo --doctor --verbose`) from the shell instead.".dimmed());
+    Ok(CommandOutcome::Continue)
 }
 
 fn mcp_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> {
@@ -3156,7 +3207,17 @@ fn agents_cmd(session: &mut Session, args: &[String]) -> Result<CommandOutcome> 
         Some("run") => {
             println!("{} /agents run needs the interactive session (it does real model calls).", "✗".red());
         }
-        Some(other) => println!("{} Unknown /agents subcommand '{other}'. Try: list, create, run.", "✗".red()),
+        Some("delete") | Some("remove") => {
+            let Some(name) = args.get(1).cloned() else {
+                println!("{} Usage: /agents delete <name>", "✗".red());
+                return Ok(CommandOutcome::Continue);
+            };
+            match crate::agent::subagent::delete(session.agent.workspace(), &name) {
+                Ok(()) => println!("{} Deleted subagent '{name}'.", "✓".green()),
+                Err(e) => println!("{} {e}", "✗".red()),
+            }
+        }
+        Some(other) => println!("{} Unknown /agents subcommand '{other}'. Try: list, create, run, delete.", "✗".red()),
     }
     Ok(CommandOutcome::Continue)
 }
@@ -3285,7 +3346,7 @@ mod tests {
 
         apply_workspace_change(&mut session, new_dir.clone()).unwrap();
 
-        assert_eq!(session.agent.workspace(), new_dir.canonicalize().unwrap());
+        assert_eq!(session.agent.workspace(), crate::utils::real_path(&new_dir).unwrap());
         assert!(!session.agent.permissions().is_session_granted(PermissionKind::Terminal));
     }
 
@@ -3299,7 +3360,7 @@ mod tests {
         // whatever directory this test binary happens to be running from.
         workspace_cmd(&mut session, &["child".to_string()]).unwrap();
 
-        assert_eq!(session.agent.workspace(), workspace.join("child").canonicalize().unwrap());
+        assert_eq!(session.agent.workspace(), crate::utils::real_path(&workspace.join("child")).unwrap());
     }
 
     #[test]

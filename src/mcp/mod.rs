@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
@@ -137,6 +138,21 @@ impl McpClient {
     }
 
     async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        // `initialize` gets a short, tight timeout — a server that can't
+        // even complete its handshake promptly is unlikely to ever work,
+        // and a slow-to-start server shouldn't make `/mcp connect` look
+        // hung for half a minute. `tools/call` gets a much longer one:
+        // a real tool invocation (a build, a long-running script) can
+        // legitimately take minutes, and REXO has no way to distinguish
+        // "still working" from "stuck" other than time — better to wait
+        // than to kill a tool call that was about to succeed.
+        // `tools/list` sits in between: it should be fast, but a server
+        // that builds its tool list lazily on first request is plausible.
+        let budget = match method {
+            "initialize" => Duration::from_secs(15),
+            "tools/call" => Duration::from_secs(180),
+            _ => Duration::from_secs(30),
+        };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -145,13 +161,13 @@ impl McpClient {
         let line = format!("{}\n", serde_json::to_string(&payload)?);
         self.stdin.lock().await.write_all(line.as_bytes()).await.with_context(|| format!("couldn't write {method} to {}", self.server_name))?;
 
-        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        match tokio::time::timeout(budget, rx).await {
             Ok(Ok(Ok(result))) => Ok(result),
             Ok(Ok(Err(reason))) => Err(anyhow!("{}", reason)),
             Ok(Err(_)) => Err(anyhow!("{} closed the connection before replying", self.server_name)),
             Err(_) => {
                 self.pending.lock().await.remove(&id);
-                Err(anyhow!("{} did not respond to {method} within 30s", self.server_name))
+                Err(anyhow!("{} did not respond to {method} within {}s", self.server_name, budget.as_secs()))
             }
         }
     }

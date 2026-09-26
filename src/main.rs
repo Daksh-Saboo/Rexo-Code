@@ -78,6 +78,22 @@ struct Cli {
     #[arg(long)]
     list_tools: bool,
 
+    /// Diagnose this REXO installation — config, provider reachability,
+    /// MCP servers, skills, permissions, network, git — and exit. Add
+    /// `--verbose` for full detail (safe to paste into a bug report:
+    /// secrets are never printed, only whether a key is present). Also
+    /// runs when the first word of the prompt is literally "doctor"
+    /// with nothing else (`rexo doctor`), so it works the way
+    /// `--version` does without needing `--` first.
+    #[arg(long)]
+    doctor: bool,
+
+    /// With `--doctor` (or `rexo doctor`): include full detail for each
+    /// check (resolved paths, exact endpoints, which config layer a
+    /// value came from) instead of just pass/warn/fail.
+    #[arg(long)]
+    verbose: bool,
+
     /// Output format for single-shot (`rexo "task"`) runs. `text` (default)
     /// prints normally; `json`/`jsonl` print one JSON object with the
     /// outcome instead, for scripts/CI to parse — see README's Headless
@@ -133,6 +149,17 @@ async fn main() -> Result<()> {
             println!("    {}", tool.description());
         }
         return Ok(());
+    }
+
+    // `rexo doctor` (bare, no other words) or `--doctor` — checked before
+    // config load/the wizard/the trust dialog on purpose: diagnosing a
+    // broken or unconfigured install is exactly the situation where none
+    // of those should get in the way, and a missing/invalid config is
+    // itself one of the things this reports rather than something that
+    // should stop it from running at all.
+    if cli.doctor || cli.prompt == ["doctor"] {
+        let exit = cli::doctor::run(&workspace, cli.verbose).await;
+        std::process::exit(exit);
     }
 
     let is_interactive_session = cli.prompt.is_empty();

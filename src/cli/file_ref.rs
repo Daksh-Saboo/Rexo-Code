@@ -77,7 +77,7 @@ fn extract_refs(text: &str) -> Vec<String> {
 
 fn resolve_one(reference: &str, workspace: &Path) -> ResolvedRef {
     let candidate = workspace.join(reference);
-    let inside = match (workspace.canonicalize(), candidate.canonicalize()) {
+    let inside = match (crate::utils::real_path(workspace), crate::utils::real_path(&candidate)) {
         (Ok(ws), Ok(c)) => c.starts_with(&ws),
         _ => false,
     };
@@ -88,7 +88,7 @@ fn resolve_one(reference: &str, workspace: &Path) -> ResolvedRef {
             note: Some("not found in this workspace".to_string()),
         };
     }
-    let path = candidate.canonicalize().expect("just checked above");
+    let path = crate::utils::real_path(&candidate).expect("just checked above");
 
     if path.is_dir() {
         match list_dir(&path, workspace) {

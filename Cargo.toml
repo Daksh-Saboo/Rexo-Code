@@ -1,6 +1,6 @@
 [package]
 name = "rexo-code"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 description = "Rexo Code — an open-source, provider-agnostic AI coding agent"
 license = "MIT"
@@ -31,6 +31,12 @@ ansi-to-tui = "4.1"
 # on Windows, XDG dirs on Linux, Application Support on macOS) — see
 # src/config/global.rs.
 dirs = "5"
+# Strips the Windows `\\?\` verbatim-path prefix that
+# `std::fs::canonicalize` adds there — see `src/utils/mod.rs::real_path`,
+# used everywhere a path is canonicalized so it stays safe to hand to
+# external processes (git, hooks, MCP servers) and to show the user.
+# Pure Rust, no transitive deps, identity function on non-Windows.
+dunce = "1"
 dotenvy = "0.15"
 futures-util = "0.3"
 # Respects .gitignore/.ignore when walking the workspace for `@file`

@@ -7,6 +7,7 @@
 //! OpenAI-style `/chat/completions` protocol, share one HTTP client
 //! implementation in [`protocol`].
 
+pub mod anthropic;
 pub mod catalog;
 pub mod gemini;
 pub mod local;
@@ -451,8 +452,16 @@ pub fn build_provider(config: &Config, api_key: String) -> Result<Box<dyn Provid
             config.model.max_tokens,
             config.model.base_url.clone(),
         ))),
+        "anthropic" => Ok(Box::new(anthropic::AnthropicProvider::new(
+            display_name,
+            api_key,
+            model,
+            config.model.temperature,
+            config.model.max_tokens,
+            config.model.base_url.clone(),
+        ))),
         other => Err(anyhow!(
-            "Unknown provider '{other}'. Expected one of: nvidia, openai_compatible, local, gemini."
+            "Unknown provider '{other}'. Expected one of: nvidia, openai_compatible, local, gemini, anthropic."
         )),
     }
 }

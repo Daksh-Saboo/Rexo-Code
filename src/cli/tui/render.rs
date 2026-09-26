@@ -8,6 +8,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear as ClearWidget, Paragraph, Wrap};
 use ratatui::Frame;
+use std::time::Instant;
 
 use super::{EntryKind, HelpState, HelpTab, PermissionView, UiState, SPINNER_FRAMES};
 use crate::agent::NoteLevel;
@@ -87,14 +88,36 @@ pub(super) fn draw(f: &mut Frame<'_>, core: &UiState) {
         .split(area);
 
     draw_header(f, chunks[0], core);
-    if core.tasks_visible {
-        let cols = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Min(20), Constraint::Length(30)]).split(chunks[1]);
-        draw_transcript(f, cols[0], core);
-        draw_tasks_panel(f, cols[1], core);
-        draw_autocomplete(f, cols[0], core);
-    } else {
-        draw_transcript(f, chunks[1], core);
-        draw_autocomplete(f, chunks[1], core);
+    match (core.tasks_visible, core.agents_panel_visible) {
+        (false, false) => {
+            draw_transcript(f, chunks[1], core);
+            draw_autocomplete(f, chunks[1], core);
+        }
+        (true, false) => {
+            let cols = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Min(20), Constraint::Length(30)]).split(chunks[1]);
+            draw_transcript(f, cols[0], core);
+            draw_tasks_panel(f, cols[1], core);
+            draw_autocomplete(f, cols[0], core);
+        }
+        (false, true) => {
+            let cols = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Min(20), Constraint::Length(34)]).split(chunks[1]);
+            draw_transcript(f, cols[0], core);
+            draw_agents_panel(f, cols[1], core);
+            draw_autocomplete(f, cols[0], core);
+        }
+        (true, true) => {
+            // Both panels open at once: stack them in the same side
+            // column rather than eating a second column's worth of
+            // transcript width — an edge case (Ctrl+T and Ctrl+B are
+            // independent toggles), not the common case, so it doesn't
+            // need its own dedicated width budget.
+            let cols = Layout::default().direction(Direction::Horizontal).constraints([Constraint::Min(20), Constraint::Length(34)]).split(chunks[1]);
+            let rows = Layout::default().direction(Direction::Vertical).constraints([Constraint::Percentage(40), Constraint::Percentage(60)]).split(cols[1]);
+            draw_transcript(f, cols[0], core);
+            draw_tasks_panel(f, rows[0], core);
+            draw_agents_panel(f, rows[1], core);
+            draw_autocomplete(f, cols[0], core);
+        }
     }
     draw_input(f, chunks[2], core);
     draw_hint(f, chunks[3], core);
@@ -131,8 +154,15 @@ fn draw_header(f: &mut Frame<'_>, area: Rect, core: &UiState) {
         Some(t) => format!("Rexo Code v{}  —  {t}", core.header.version),
         None => format!("Rexo Code v{}", core.header.version),
     };
+    let mut first_line = vec![Span::styled(title_line, Style::default().add_modifier(Modifier::BOLD))];
+    if core.header.background_working > 0 {
+        first_line.push(Span::styled(
+            format!("  ⏵ {} background", core.header.background_working),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
     let text = vec![
-        Line::from(Span::styled(title_line, Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(first_line),
         Line::from(Span::raw(core.header.provider_desc.clone())),
         Line::from(Span::styled(core.header.workspace.clone(), Style::default().fg(Color::DarkGray))),
         Line::from(vec![
@@ -362,6 +392,108 @@ fn draw_tasks_panel(f: &mut Frame<'_>, area: Rect, core: &UiState) {
         })
         .collect();
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+/// The Ctrl+B panel: defined personas, then every background job (newest
+/// first), one selectable list with a wrapped detail block for whichever
+/// row is selected — see `agents_panel_act_on_selected` (Ctrl+X) for the
+/// actions available on the selected row. Narrower-than-ideal detail
+/// space (this column is 34 cells wide) is why the detail block wraps
+/// rather than trying to fit a job's full output on one line.
+fn draw_agents_panel(f: &mut Frame<'_>, area: Rect, core: &UiState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(core.header.accent))
+        .title(" Agents & Background (Ctrl+B) ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if core.agents_personas.is_empty() && core.background_snapshot.is_empty() {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled("(nothing yet)", Style::default().fg(Color::DarkGray))),
+                Line::from(""),
+                Line::from(Span::styled("/agents create <n> \"<desc>\"", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled("/background \"<task>\"", Style::default().fg(Color::DarkGray))),
+            ])
+            .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let rows = Layout::default().direction(Direction::Vertical).constraints([Constraint::Percentage(55), Constraint::Percentage(45)]).split(inner);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let selected = core.agents_panel_selected;
+    let mut row_idx = 0usize;
+
+    if !core.agents_personas.is_empty() {
+        lines.push(Line::from(Span::styled("Personas", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))));
+        for (name, _desc) in &core.agents_personas {
+            let is_sel = row_idx == selected;
+            let style = if is_sel { Style::default().fg(Color::Black).bg(core.header.accent) } else { Style::default() };
+            lines.push(Line::from(Span::styled(format!("{} {name}", if is_sel { "▶" } else { " " }), style)));
+            row_idx += 1;
+        }
+    }
+    if !core.background_snapshot.is_empty() {
+        if !core.agents_personas.is_empty() {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled("Jobs", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))));
+        for job in &core.background_snapshot {
+            let is_sel = row_idx == selected;
+            let (mark, color) = match job.status {
+                crate::agent::background::JobStatus::Working => ("●", Color::Yellow),
+                crate::agent::background::JobStatus::Done => ("✓", Color::Green),
+                crate::agent::background::JobStatus::Failed => ("✗", Color::Red),
+                crate::agent::background::JobStatus::Cancelled => ("○", Color::DarkGray),
+            };
+            let label = format!("{} {mark} #{} [{}] {}", if is_sel { "▶" } else { " " }, job.id, job.label, job.status.label());
+            let base_style = if is_sel { Style::default().fg(Color::Black).bg(core.header.accent) } else { Style::default().fg(color) };
+            lines.push(Line::from(Span::styled(label, base_style)));
+            row_idx += 1;
+        }
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), rows[0]);
+
+    // Detail block for whichever row is selected.
+    let persona_count = core.agents_personas.len();
+    let detail_lines: Vec<Line> = if selected < persona_count {
+        let (name, desc) = &core.agents_personas[selected];
+        vec![
+            Line::from(Span::styled(name.clone(), Style::default().add_modifier(Modifier::BOLD))),
+            Line::from(Span::raw(desc.clone())),
+            Line::from(""),
+            Line::from(Span::styled("Enter task on /agents run, or Ctrl+X to delete", Style::default().fg(Color::DarkGray))),
+        ]
+    } else if let Some(job) = core.background_snapshot.get(selected - persona_count) {
+        let elapsed = job.finished_at.unwrap_or_else(Instant::now).saturating_duration_since(job.started_at);
+        let mut v = vec![
+            Line::from(Span::styled(format!("#{} [{}] {}", job.id, job.label, job.status.label()), Style::default().add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(format!("{}s", elapsed.as_secs()), Style::default().fg(Color::DarkGray))),
+            Line::from(Span::raw(job.task.clone())),
+            Line::from(""),
+        ];
+        if let Some(output) = &job.output {
+            v.push(Line::from(Span::styled(output.clone(), Style::default().fg(Color::Gray))));
+        } else {
+            v.push(Line::from(Span::styled("(still running…)", Style::default().fg(Color::DarkGray))));
+        }
+        v.push(Line::from(""));
+        v.push(Line::from(Span::styled(
+            if job.status == crate::agent::background::JobStatus::Working { "Ctrl+X to cancel" } else { "Ctrl+X to remove" },
+            Style::default().fg(Color::DarkGray),
+        )));
+        v
+    } else {
+        Vec::new()
+    };
+    f.render_widget(
+        Paragraph::new(detail_lines).wrap(Wrap { trim: true }).block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray))),
+        rows[1],
+    );
 }
 
 fn draw_hint(f: &mut Frame<'_>, area: Rect, core: &UiState) {

@@ -21,30 +21,33 @@ that isn't read-only.
 
 ## Status
 
-This is v0.8.0: a working agent loop with real tool-calling and streaming
-(including native Gemini SSE streaming and multimodal image input via
-Alt+V), support for many OpenAI-compatible providers plus local models, a
-persistent full-screen terminal UI with an animated startup intro, arrow-key
-pickers for `/connect`/`/model`/first-launch setup/`/resume`/`/rewind`,
-session persistence (`/resume`, `/branch`, `/fork`), a shell-mode
-passthrough (`!`), quick side questions (`btw <question>`), a skills
-system, custom commands, installable plugins bundling skills/commands/hooks
-(`/plugin`), a real MCP client speaking the actual stdio JSON-RPC protocol
-(`/mcp connect`), lifecycle hooks around tool calls and session start/end
-(`/hooks`), sequential subagents with their own persona and context
-(`/agents run`), a model-driven task list (Ctrl+T), single-level file-edit
-undo (`/undo`, Ctrl+Shift+_), a local server for future editor integration
-(`/ide` — see [Known limitations](#known-limitations), no editor extension
-ships yet), a permission/security layer gating every tool call, a provider
-capability model and normalized error classification, and CI/packaged
-downloads for all five target platforms instead of source-only delivery.
+This is v0.9.0: a working agent loop with real tool-calling and streaming
+(including native Gemini and native Anthropic SSE streaming, and
+multimodal image input via Alt+V), support for many OpenAI-compatible
+providers plus local models, a persistent full-screen terminal UI with an
+animated startup intro, arrow-key pickers for
+`/connect`/`/model`/first-launch setup/`/resume`/`/rewind`, session
+persistence (`/resume`, `/branch`, `/fork`), a shell-mode passthrough
+(`!`), quick side questions (`btw <question>`), a skills system, custom
+commands, installable plugins bundling skills/commands/hooks (`/plugin`),
+a real MCP client speaking the actual stdio JSON-RPC protocol (`/mcp
+connect`), lifecycle hooks around tool calls and session start/end
+(`/hooks`), real background jobs (`/background`, and `/agents run`, both
+non-blocking, with a Ctrl+B panel to watch them), a model-driven task
+list (Ctrl+T), single-level file-edit undo (`/undo`, Ctrl+Shift+_), a
+local server for future editor integration (`/ide` — see [Known
+limitations](#known-limitations), no editor extension ships yet), a
+`rexo doctor` diagnostic command, a permission/security layer gating
+every tool call, a provider capability model and normalized error
+classification, and CI/packaged downloads for all five target platforms
+instead of source-only delivery.
 It has not been run against a large real-world codebase yet — treat it as
 an early, working foundation rather than a finished product. See
 [Roadmap](#roadmap) for what's next, and [Known limitations](#known-limitations)
-for an honest list of what's real vs. still scoped down (background/
-concurrent subagents with git-worktree isolation, in particular, aren't —
-`/agents run` is real but sequential, blocking the session until it
-finishes).
+for an honest list of what's real vs. still scoped down (git-worktree
+isolation between concurrent background jobs, in particular, isn't real
+yet — every job shares the one workspace on disk with the parent session
+and with each other).
 
 **Renamed from TRON-Code to Rexo Code in v0.7.1** — a naming clash with
 an existing, unrelated project. Everything user-facing changed to match:
@@ -106,6 +109,69 @@ A couple of honest caveats, stated plainly rather than glossed over:
   → Open once to approve it. Code-signing needs a paid Apple Developer
   account, which isn't set up for this project — a real limitation, not
   an oversight.
+
+### What's new in v0.9.0
+
+- **The actual bug behind "changing the workspace kills the session"**:
+  every `.canonicalize()` call site leaked Windows' `\\?\`
+  extended-length verbatim path prefix (visible in the wild as e.g.
+  `\\?\I:\TRON-Code\test1`) into paths shown to the user and handed to
+  subprocesses. Fixed structurally with `dunce` (the same crate
+  cargo/rustc/ripgrep use for this) everywhere a path gets
+  canonicalized, not just at the one call site the bug report pointed
+  at.
+- **Panic containment**: a bug anywhere in one command, one tool call,
+  or one turn used to unwind straight past the agent loop and kill the
+  whole process — the terminal got restored (there was already a
+  top-level panic hook for that), but the session was gone, forcing a
+  full relaunch. Now caught at each of those three levels and reported
+  as a normal error in the transcript instead. Root-caused and fixed
+  with a real regression test that forces a panic inside a tool
+  implementation and confirms the session survives it.
+- **`/background` is real** (previously a `Status::Planned` stub since
+  v0.6): spawns a genuine background `tokio` task, no blocking. `/agents
+  run` now works the same way instead of blocking the session — which
+  also fixed the actual root cause of `/agents run`'s garbled v0.8
+  output: the old synchronous path wrote raw, un-styled output straight
+  to stdout while ratatui's alt-screen renderer had no idea that
+  happened, so the two fought over the same terminal cells. The new
+  silent execution path (`Agent::respond_silent`) writes nothing to the
+  terminal at all.
+- **Ctrl+B**: a real, arrow-key-navigable panel for defined personas and
+  every background job (live or finished) — status, elapsed time, and
+  full output/task text for whichever row is selected. Ctrl+X cancels a
+  running job, removes a finished one, or deletes the selected persona.
+  Refreshes live (a short idle-tick, armed only while something's
+  actually worth refreshing for) instead of only on the next keypress.
+- **`/agents delete <name>`** — was missing entirely.
+- A real **native Anthropic provider** (`providers::anthropic`) — the
+  actual Messages API wire format (`x-api-key`, `anthropic-version`,
+  content-block messages, SSE `content_block_*` streaming), not routed
+  through the OpenAI-compatible client. `/connect`'s custom-endpoint flow
+  (and the first-launch wizard's) now asks which wire format an endpoint
+  actually speaks — OpenAI-compatible, Anthropic-native, or
+  Gemini-native — instead of assuming OpenAI-compatible and 401ing with
+  no explanation. Also fixed a real bug found while building this: the
+  first-launch wizard's preset-to-driver mapping ignored the catalog's
+  own `kind` field and re-derived it via a hardcoded `if/else` chain
+  that didn't know about Gemini — picking Gemini from the wizard
+  silently mis-routed it through the wrong client. `/connect` (which
+  already read the field directly) didn't have this bug.
+- **`rexo doctor`** (`--doctor`, or bare `rexo doctor`, `--verbose` for
+  detail; `/doctor` inside the interactive session) — checks
+  installation, config, provider + credential resolution, configured MCP
+  servers, skills, permissions, DNS reachability to the configured
+  provider, git, and the shell. Never prints a key's value, only whether
+  one resolved.
+- MCP tool-call timeout raised and separated from the handshake timeout
+  (15s for `initialize`, 180s for `tools/call`, 30s for everything
+  else) — a real tool invocation (a build, a long script) can
+  legitimately run for minutes; the handshake shouldn't ever take that
+  long.
+- A cap on how much of an oversized `SKILL.md` gets injected when
+  triggered (truncated with a note past 8,000 characters) — one huge
+  skill file could otherwise eat a large, unbounded chunk of context on
+  every single trigger.
 
 ### What's new in v0.7.3
 
@@ -695,16 +761,32 @@ example payloads, including a full multi-chunk stream strung together
 byte-by-byte (`cargo test -- gemini`), not an end-to-end call — please
 file an issue if the live shape has drifted from what's implemented.
 
-Anthropic and Cohere use their own genuinely different wire protocols too
-and don't have adapters yet — see [Known limitations](#known-limitations)
-rather than a catalog entry that would silently fail to connect. A native
-Gemini driver exists now specifically because it was the most-requested
-gap; the same `kind`-based pattern in `providers::build_provider` is what
-the next one would extend.
+Anthropic and Cohere use their own genuinely different wire protocols
+too. **Anthropic now has a real, native driver as well**
+(`src/providers/anthropic/`, `/connect` → Anthropic) — the actual
+Messages API (`x-api-key`/`anthropic-version` headers, content-block
+messages, `tool_use`/`tool_result` blocks, `content_block_*` SSE
+streaming with `input_json_delta` fragments reassembled per block index)
+rather than routed through the OpenAI-compatible client. Same untested-
+against-the-live-API caveat as Gemini's: this sandbox can't reach
+`api.anthropic.com` with a real key, so what's covered is request-
+building and stream reassembly against hand-written payloads matching
+Anthropic's documented format (`cargo test -- anthropic`), not an
+end-to-end call. Cohere and AWS Bedrock still don't have adapters — see
+[Known limitations](#known-limitations) rather than a catalog entry that
+would silently fail to connect. The same `kind`-based pattern in
+`providers::build_provider` both native drivers use is what either of
+those would extend.
+
+A custom endpoint (`/connect` → `custom`, `/provider add`, or the
+first-launch wizard's own custom-endpoint path) now asks which of these
+three wire formats it actually speaks, rather than assuming
+OpenAI-compatible and 401ing with no explanation if it turns out to be a
+proxy in front of Gemini or Anthropic.
 
 ```toml
 [model]
-provider = "nvidia"            # or "openai_compatible", "local", or "gemini"
+provider = "nvidia"            # or "openai_compatible", "local", "gemini", "anthropic"
 model = "moonshotai/kimi-k3"
 # base_url = "..."             # required for openai_compatible; optional
                                 # override for local (default: localhost:11434)
@@ -920,17 +1002,19 @@ it's obvious something's missing.
 Inside an interactive session, you don't need to edit `rexo.toml` or
 restart to change anything — everything below takes effect immediately.
 This is the core set; run **`/help`** (or type **`{?}`** for just the
-keyboard shortcuts) for the complete, current list — around 55 commands as
-of v0.8.0, with `/background` the one command marked `(planned)` and
-registered honestly rather than left out or faked (it needs git-worktree
-isolation — see [Roadmap](#roadmap)):
+keyboard shortcuts) for the complete, current list — every command listed
+is real as of v0.9.0, none marked `(planned)` anymore.
 
 ```
 /help                  Show the full-screen command browser
 {?}                    Show the keyboard shortcut list
 /status                Provider, model, workspace, permissions, limits
 /config                Non-secret configuration (rexo.toml-shaped)
-/doctor                Health-check: workspace, git, credentials, global config location
+/doctor [--verbose]    Config, provider, MCP, skills, permissions, network, git — same as `rexo doctor`
+
+/agents [list|create <n> "<desc>"|delete <n>|run <n> "<task>"]
+                       No arguments opens the panel (Ctrl+B); run starts a background job
+/background [<task>]  Run a task as a background job — no arguments opens the panel (Ctrl+B)
 
 /model [id]            Show/change model — search live, or enter any ID
 /models                List models available from the current endpoint
@@ -977,7 +1061,10 @@ isolation — see [Roadmap](#roadmap)):
 Shortcuts worth knowing beyond the slash commands: a bare **`?`** as the
 very first character (before anything else is typed) opens the shortcut
 list immediately, same as `{?}`. **Alt+M**/**Alt+P** jump straight to the
-`/model`/`/provider` pickers from anywhere. **Ctrl+Y** toggles "selection
+`/model`/`/provider` pickers from anywhere. **Ctrl+T** toggles the
+model-driven task list; **Ctrl+B** toggles the agents/background-jobs
+panel (arrow keys to navigate, Ctrl+X to cancel/remove/delete the
+selected row). **Ctrl+Y** toggles "selection
 mode" — it releases the terminal's own mouse capture so its native
 click-drag select-and-copy works normally, since having mouse capture on
 (which this screen needs for scroll-wheel support) is exactly what stops
@@ -1185,18 +1272,45 @@ partially there.
   transport (the `url` half of a server config), automatic reconnect if
   a connected server crashes (its tools just start erroring until you
   `/mcp connect` again), and the resource/prompt halves of the MCP spec
-  (tool-calling only — the part REXO's own agent loop can act on).
+  (tool-calling only — the part REXO's own agent loop can act on). Tool
+  calls get a 180s timeout, separate from the 15s handshake timeout —
+  neither is currently configurable per server.
+- **`rexo doctor` doesn't make an authenticated request to the
+  provider.** It resolves whether a credential is present and checks DNS
+  reachability to the configured host, not whether the key itself is
+  valid — confirming that needs a real, billable API call doctor
+  deliberately doesn't make on your behalf. An expired/wrong key still
+  shows as "configured."
+- **The native Anthropic driver is untested against the live API.**
+  Request-building and streaming-chunk reassembly are covered by unit
+  tests against hand-written payloads matching Anthropic's documented
+  format — this build sandbox can't reach `api.anthropic.com` with a
+  real key to confirm end-to-end. Worth confirming against one before
+  relying on it.
+- **Panic containment covers the command/tool-call/turn layers, not
+  everything.** A bug in, say, the ratatui rendering path itself
+  (`draw()`) isn't caught the way a command handler or tool
+  implementation's panic now is — the fix targets the specific class of
+  bug the v0.8 reports actually hit, not blanket protection against any
+  possible panic anywhere in the binary.
 - **Hooks run real shell commands with no sandboxing.** `/hooks`'
   `pre_tool`/`post_tool`/`session_start`/`session_end` events genuinely
   execute what you configure, with the same trust model as any other
   command REXO runs on your behalf — a hook is exactly as powerful as
   typing the command yourself, not sandboxed or resource-limited.
-- **Subagents (`/agents run`) are sequential, not concurrent.** A real,
-  bounded, persona-configured agent runs a task to completion using its
-  own conversation — but it blocks the parent session until it finishes,
-  and shares the same workspace with no isolation. Concurrent/backgrounded
-  subagents need git-worktree isolation on top of this, which isn't
-  built — see [Roadmap](#roadmap).
+- **Background jobs (`/background`, `/agents run`) share one workspace
+  with no isolation, and cancellation is cooperative, not preemptive.**
+  Both spawn a genuine, concurrent `tokio` task — not sequential/blocking
+  the way `/agents run` used to be — but every job (and the parent
+  session) still reads and writes the same files on disk with no
+  git-worktree isolation between them, so two jobs editing overlapping
+  files can race each other exactly like two humans editing the same
+  repo at once would. Ctrl+X's "cancel" is checked between agent-loop
+  iterations, so a job already mid-request finishes that one request
+  before noticing — there's no way to abort an in-flight HTTP call
+  mid-stream without leaving the connection in an unknown state.
+  Git-worktree isolation remains the one clear item carried forward on
+  the roadmap.
 - **`/ide` has no editor extension to talk to yet.** The server side is
   real and tested (a local TCP server, a documented newline-JSON
   protocol, a discovery lockfile) — but there's no VSCode/JetBrains
@@ -1220,10 +1334,11 @@ partially there.
   it just won't be useful against a model that can't see it) — it's an
   honest "don't know" for most endpoints and most fields, not a populated
   capability matrix.
-- **No adapters yet for non-OpenAI-compatible protocols** — Anthropic,
-  Cohere, AWS Bedrock. Not in the `/connect` catalog at all rather than
-  listed and silently broken. (Google Gemini *does* have a native adapter
-  — see [Providers](#providers) — this list is what's still missing.)
+- **No adapters yet for two of the four named non-OpenAI-compatible
+  protocols** — Cohere, AWS Bedrock. Not in the `/connect` catalog at
+  all rather than listed and silently broken. (Google Gemini and
+  Anthropic *do* have native adapters — see [Providers](#providers) —
+  this list is what's still missing.)
 - **No live pricing, context-window, or token-usage display.** `/context`
   gives a rough character-count estimate labeled as such; REXO doesn't
   maintain (and won't fabricate) a static pricing/context-window database
@@ -1358,6 +1473,15 @@ partially there.
 - [x] Quick side questions (v0.8.0) — `btw <question>` answers with full
       context but doesn't consume it, the same way `/rewind` reverts
       conversation without touching files
+- [x] Real background jobs (v0.9.0) — `/background` (previously a
+      `Status::Planned` stub) and non-blocking `/agents run`, a Ctrl+B
+      panel to watch them, `/agents delete`
+- [x] `rexo doctor` (v0.9.0) — `--doctor`/bare `rexo doctor`/`/doctor`
+- [x] Panic containment (v0.9.0) — a bug in one command/tool call/turn no
+      longer takes down the whole session
+- [x] The Windows `\\?\` verbatim-path leak fixed structurally (v0.9.0) —
+      every `.canonicalize()` call site, not just the one bug report
+      pointed at
 
 **On background/concurrent subagents and worktree isolation** — still the
 one real gap left from the original "harness" wishlist. `/agents run`
@@ -1375,12 +1499,27 @@ point; it does not revert any file edits the agent made after that
 point. Reverting file state too would need workspace snapshots
 (git-based or otherwise), which isn't built — `/rewind`'s own output
 says this every time, not just here.
+
+**Update, v0.9.0**: `/agents run` and `/background` are now genuinely
+non-blocking — both spawn a real, concurrent `tokio` task instead of
+blocking the launching session, with a Ctrl+B panel to watch them. What
+*isn't* here yet is the git-worktree isolation piece: every job still
+shares the one workspace on disk with the parent session and with every
+other job, so two of them editing overlapping files can race each other.
+That isolation layer is the one part of this that remains a genuinely
+from-scratch subsystem, not a small addition on top of what exists now.
+
+- [ ] Git-worktree isolation between concurrent background jobs — the one
+      piece left from the original "harness" wishlist now that background
+      execution itself (v0.9.0) is real
 - [ ] Capability-aware agent behavior (actually gating on
       `Provider::capabilities()`, not just displaying it)
 - [x] Native Google Gemini driver, with real SSE streaming as of v0.6 —
       still untested against the live API (see [Providers](#providers))
-- [ ] Native (non-OpenAI-compatible) provider adapters: Anthropic, Cohere,
-      AWS Bedrock
+- [x] Native Anthropic driver (v0.9.0) — real Messages API wire format,
+      SSE streaming, tool-use block reassembly — still untested against
+      the live API, same caveat as Gemini's (see [Providers](#providers))
+- [ ] Native (non-OpenAI-compatible) provider adapters: Cohere, AWS Bedrock
 - [ ] Text/XML tool-call fallback protocol for models without native tool calling
 - [ ] Capability-aware provider fallback (don't fail over to a model that
       can't do what the task needs)
@@ -1390,7 +1529,8 @@ says this every time, not just here.
       Alt+V clipboard *image* paste as of v0.8.0)
 - [x] Arrow-key, type-to-filter pickers for `/connect`/`/model`/`/models`/
       `/provider`, fully in-TUI (masked API-key entry included)
-- [x] A skills system (`.rexo/skills/`, keyword-triggered + `/skill`)
+- [x] A skills system (`.rexo/skills/`, keyword-triggered + `/skill`),
+      with a size cap on an oversized `SKILL.md` as of v0.9.0
 - [x] Custom commands (`.rexo/commands/`, `$ARGUMENTS`/`$1..$9`)
 - [ ] Real, model-generated conversation summarization (`/compact` is a
       placeholder-substitution heuristic today, not a summary)

@@ -156,9 +156,13 @@ fn split_on_chaining(command: &str) -> Vec<String> {
 /// (needed for file *creation*), but canonicalizes when the path already
 /// exists so symlink tricks can't escape the sandbox.
 pub fn validate_workspace_path(workspace: &Path, requested: &str) -> Result<PathBuf> {
-    let workspace = workspace
-        .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
+    // `crate::utils::real_path` rather than raw `.canonicalize()` — see its
+    // docs. Matters here specifically: a raw canonicalize would re-add
+    // Windows' `\\?\` prefix even though the workspace is stored
+    // prefix-free everywhere else post-v0.9, and the `resolved` path this
+    // returns gets shown to the user and handed to tools/subprocesses
+    // downstream, not just compared internally.
+    let workspace = crate::utils::real_path(workspace).unwrap_or_else(|_| workspace.to_path_buf());
 
     let candidate = Path::new(requested);
     let joined = if candidate.is_absolute() {
@@ -169,9 +173,7 @@ pub fn validate_workspace_path(workspace: &Path, requested: &str) -> Result<Path
 
     let normalized = lexically_normalize(&joined);
 
-    let resolved = normalized
-        .canonicalize()
-        .unwrap_or_else(|_| normalized.clone());
+    let resolved = crate::utils::real_path(&normalized).unwrap_or_else(|_| normalized.clone());
 
     if !resolved.starts_with(&workspace) {
         return Err(anyhow!(
@@ -271,6 +273,6 @@ mod tests {
         let dir = std::env::temp_dir().join("rexo_test_workspace_ok");
         std::fs::create_dir_all(&dir).unwrap();
         let resolved = validate_workspace_path(&dir, "src/main.rs").unwrap();
-        assert!(resolved.starts_with(dir.canonicalize().unwrap()));
+        assert!(resolved.starts_with(crate::utils::real_path(&dir).unwrap()));
     }
 }

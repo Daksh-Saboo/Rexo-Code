@@ -21,8 +21,9 @@
 //!   protocol get their own `kind` and a real driver instead of being
 //!   force-fit through the OpenAI-compatible client (which 401s or
 //!   400s no matter what key you give it, since both the auth header
-//!   and the request/response shape are wrong). Google Gemini has one
-//!   now (`providers::gemini`) — Anthropic and Cohere don't yet; see
+//!   and the request/response shape are wrong). Google Gemini and
+//!   Anthropic both have one now (`providers::gemini`,
+//!   `providers::anthropic`) — Cohere and AWS Bedrock don't yet; see
 //!   the README roadmap.
 //!
 //! No pricing, context-window, or "free tier" claims live here — see
@@ -63,6 +64,14 @@ pub const CATALOG: &[ProviderPreset] = &[
         base_url: Some("https://generativelanguage.googleapis.com/v1beta"),
         requires_key: true,
         notes: "native driver, not OpenAI-compatible — free tier via Google AI Studio",
+    },
+    ProviderPreset {
+        key: "anthropic",
+        display_name: "Anthropic",
+        kind: "anthropic",
+        base_url: Some("https://api.anthropic.com"),
+        requires_key: true,
+        notes: "native Messages API driver, not OpenAI-compatible — Claude models",
     },
     ProviderPreset {
         key: "openrouter",

@@ -1,345 +1,136 @@
 #!/usr/bin/env bash
-
-# ============================================================
-# Rexo Code Installer
-# ============================================================
 #
-# Release archive:
-#   ./install.sh
+# install.sh — Linux/macOS counterpart to install.ps1.
 #
-# Source checkout:
-#   ./install.sh
+# Builds Rexo Code and puts `rexo` on your PATH, so it runs from any
+# directory instead of failing with "rexo: command not found".
 #
-# Source checkout without rebuilding:
-#   ./install.sh --skip-build
+# Works two ways:
+#   - From a downloaded release archive (a flat folder containing `rexo`
+#     right next to this script) — just copies that binary, never builds.
+#   - From a source checkout (this script next to Cargo.toml) — builds
+#     with `cargo build --release` first (skipped with --skip-build if
+#     target/release/rexo already exists).
 #
-# Optional custom installation directory:
-#   REXO_INSTALL_DIR="$HOME/bin" ./install.sh
+# Usage:
+#   ./install.sh                 # release archive: install; source tree: build + install
+#   ./install.sh --skip-build    # source tree only: reuse target/release/rexo
 #
-# Supported:
-#   Linux x86_64
-#   macOS ARM64
+# Install directory, in order of preference: $REXO_INSTALL_DIR if you set
+# it, else ~/.local/bin (created if needed — XDG convention, already on
+# PATH by default on most modern Linux distros), else ~/.rexo/bin as a
+# last resort. If it's not already on PATH, exactly one
+# `export PATH="...":$PATH` line gets appended to whichever shell rc file
+# matches your current $SHELL — nothing else in that file is touched.
 #
-# ============================================================
+# Uninstall with ./uninstall.sh.
 
 set -euo pipefail
 
 SKIP_BUILD=0
-
-# ============================================================
-# Arguments
-# ============================================================
-
 for arg in "$@"; do
-    case "$arg" in
-        --skip-build)
-            SKIP_BUILD=1
-            ;;
-
-        -h|--help)
-            cat <<'EOF'
-Rexo Code Installer
-
-Usage:
-  ./install.sh
-      Install Rexo Code.
-
-  ./install.sh --skip-build
-      Install an existing source-build binary without rebuilding.
-
-Environment:
-  REXO_INSTALL_DIR
-      Optional installation directory.
-
-Examples:
-  ./install.sh
-  ./install.sh --skip-build
-  REXO_INSTALL_DIR="$HOME/bin" ./install.sh
-
-EOF
-            exit 0
-            ;;
-
-        *)
-            echo "Error: unknown argument '$arg'" >&2
-            echo "Run './install.sh --help' for usage." >&2
-            exit 1
-            ;;
-    esac
+  case "$arg" in
+    --skip-build) SKIP_BUILD=1 ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $arg (see --help)" >&2
+      exit 1
+      ;;
+  esac
 done
 
-# ============================================================
-# Locate installer directory
-# ============================================================
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
-# ============================================================
-# Find Rexo binary
-# ============================================================
-#
-# Release archives contain:
-#
-#   rexo
-#   install.sh
-#   uninstall.sh
-#
-# Source repositories contain:
-#
-#   Cargo.toml
-#   install.sh
-#   target/release/rexo
-#
-# Release binaries always take priority.
-# ============================================================
-
-RELEASE_BIN="$SCRIPT_DIR/rexo"
-SOURCE_BIN="$SCRIPT_DIR/target/release/rexo"
-
-if [[ -f "$RELEASE_BIN" ]]; then
-
-    # --------------------------------------------------------
-    # Downloaded release archive
-    # --------------------------------------------------------
-
-    REXO_BIN="$RELEASE_BIN"
-
-    echo "Rexo Code release binary detected."
-    echo "Skipping source build."
-
+# A release archive ships the binary flat, right next to this script —
+# see release.yml's packaging step. If it's there, use it directly and
+# skip the whole cargo/source-tree path entirely; there's no Cargo.toml
+# to build from inside a downloaded archive, so even --skip-build can't
+# fall through to "try building anyway" the way it used to.
+if [ -f "$REPO_ROOT/rexo" ]; then
+  RELEASE_BIN="$REPO_ROOT/rexo"
 else
+  RELEASE_BIN="$REPO_ROOT/target/release/rexo"
 
-    # --------------------------------------------------------
-    # Source checkout
-    # --------------------------------------------------------
-
-    REXO_BIN="$SOURCE_BIN"
-
-    if [[ ! -f "$SCRIPT_DIR/Cargo.toml" ]]; then
-        echo "Error: Rexo binary was not found." >&2
-        echo "" >&2
-        echo "Expected either:" >&2
-        echo "  $RELEASE_BIN" >&2
-        echo "or a Rexo source checkout containing Cargo.toml." >&2
-        exit 1
+  if [ "$SKIP_BUILD" -eq 0 ] || [ ! -f "$RELEASE_BIN" ]; then
+    if ! command -v cargo >/dev/null 2>&1; then
+      echo "cargo wasn't found on PATH. Install Rust from https://rustup.rs first," >&2
+      echo "then re-run this script from a new shell." >&2
+      exit 1
     fi
 
-    if [[ "$SKIP_BUILD" -eq 0 ]]; then
-
-        if ! command -v cargo >/dev/null 2>&1; then
-            echo "Error: Cargo was not found on PATH." >&2
-            echo "" >&2
-            echo "Install Rust from https://rustup.rs and run this installer again." >&2
-            exit 1
-        fi
-
-        echo "Building Rexo Code in release mode..."
-        echo ""
-
-        (
-            cd "$SCRIPT_DIR"
-            cargo build --release
-        )
-
-    elif [[ ! -f "$REXO_BIN" ]]; then
-
-        echo "Error: --skip-build was specified, but the release binary does not exist:" >&2
-        echo "  $REXO_BIN" >&2
-        echo "" >&2
-        echo "Run './install.sh' without --skip-build first." >&2
-        exit 1
-
-    fi
-
+    echo "Building Rexo Code (release)..."
+    (cd "$REPO_ROOT" && cargo build --release)
+  fi
 fi
 
-# ============================================================
-# Validate binary
-# ============================================================
-
-if [[ ! -f "$REXO_BIN" ]]; then
-    echo "Error: Rexo binary was not found:" >&2
-    echo "  $REXO_BIN" >&2
-    exit 1
+if [ ! -f "$RELEASE_BIN" ]; then
+  echo "$RELEASE_BIN wasn't found. Something's off — check the cargo output above," >&2
+  echo "or confirm this script is sitting next to the 'rexo' binary if you downloaded a release." >&2
+  exit 1
 fi
 
-if [[ ! -x "$REXO_BIN" ]]; then
-    chmod +x "$REXO_BIN"
-fi
-
-# ============================================================
-# Select installation directory
-# ============================================================
-
-if [[ -n "${REXO_INSTALL_DIR:-}" ]]; then
-
-    INSTALL_DIR="$REXO_INSTALL_DIR"
-
-elif [[ -d "$HOME/.local/bin" || "$OSTYPE" == "darwin"* || "$OSTYPE" == "linux-gnu"* ]]; then
-
-    INSTALL_DIR="$HOME/.local/bin"
-
+# --- Pick an install directory -----------------------------------------
+if [ -n "${REXO_INSTALL_DIR:-}" ]; then
+  INSTALL_DIR="$REXO_INSTALL_DIR"
+elif mkdir -p "$HOME/.local/bin" 2>/dev/null; then
+  INSTALL_DIR="$HOME/.local/bin"
 else
-
-    INSTALL_DIR="$HOME/.rexo/bin"
-
+  INSTALL_DIR="$HOME/.rexo/bin"
 fi
-
+# Every branch above just picked a path, not necessarily created it — an
+# explicit $REXO_INSTALL_DIR in particular is very often set *because*
+# it doesn't exist yet. A real, PTY-verified bug in an earlier version
+# of this script: without this, an explicit $REXO_INSTALL_DIR pointing
+# at a fresh directory failed outright ("cp: cannot create regular
+# file ... No such file or directory") instead of just creating it.
 mkdir -p "$INSTALL_DIR"
 
 TARGET="$INSTALL_DIR/rexo"
-
-# ============================================================
-# Install binary
-# ============================================================
-
-echo ""
-echo "Installing Rexo Code..."
-echo "  Source: $REXO_BIN"
-echo "  Target: $TARGET"
-
-cp -f "$REXO_BIN" "$TARGET"
+cp -f "$RELEASE_BIN" "$TARGET"
 chmod +x "$TARGET"
+echo "Installed: $TARGET"
 
-echo ""
-echo "Installed successfully:"
-echo "  $TARGET"
-
-# ============================================================
-# PATH helper
-# ============================================================
-
-path_contains() {
-    case ":${PATH:-}:" in
-        *":$1:"*)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-# ============================================================
-# Configure PATH
-# ============================================================
-
-RC_FILE=""
-PATH_UPDATED=0
-
-if path_contains "$INSTALL_DIR"; then
-
-    echo ""
-    echo "Already on PATH:"
-    echo "  $INSTALL_DIR"
-
-else
-
+# --- Make sure $INSTALL_DIR is on PATH ----------------------------------
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*)
+    echo "Already on your PATH: $INSTALL_DIR"
+    ;;
+  *)
     SHELL_NAME="$(basename "${SHELL:-bash}")"
-
+    LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
     case "$SHELL_NAME" in
-
-        zsh)
-            RC_FILE="$HOME/.zshrc"
-            PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
-            ;;
-
-        fish)
-            RC_FILE="$HOME/.config/fish/config.fish"
-            PATH_LINE="fish_add_path \"$INSTALL_DIR\""
-            ;;
-
-        bash)
-            RC_FILE="$HOME/.bashrc"
-            PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
-            ;;
-
-        *)
-            RC_FILE="$HOME/.profile"
-            PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
-            ;;
-
+      fish)
+        RC_FILE="$HOME/.config/fish/config.fish"
+        LINE="set -gx PATH $INSTALL_DIR \$PATH"
+        ;;
+      zsh)
+        RC_FILE="$HOME/.zshrc"
+        ;;
+      *)
+        RC_FILE="$HOME/.bashrc"
+        ;;
     esac
-
     mkdir -p "$(dirname "$RC_FILE")"
-
-    if [[ -f "$RC_FILE" ]] && grep -Fqx "$PATH_LINE" "$RC_FILE"; then
-
-        echo ""
-        echo "PATH configuration already exists:"
-        echo "  $RC_FILE"
-
+    if [ -f "$RC_FILE" ] && grep -qxF "$LINE" "$RC_FILE"; then
+      echo "PATH line already present in $RC_FILE"
     else
-
-        {
-            echo ""
-            echo "# Rexo Code"
-            echo "$PATH_LINE"
-        } >> "$RC_FILE"
-
-        PATH_UPDATED=1
-
+      {
         echo ""
-        echo "Added Rexo Code to PATH:"
-        echo "  $RC_FILE"
-
+        echo "# Added by Rexo Code's install.sh"
+        echo "$LINE"
+      } >> "$RC_FILE"
+      echo "Added to PATH via $RC_FILE: $INSTALL_DIR"
     fi
-
-fi
-
-# ============================================================
-# Verify installation
-# ============================================================
+    echo "(only this one line was added — nothing else in $RC_FILE was touched)"
+    ;;
+esac
 
 echo ""
-
-if path_contains "$INSTALL_DIR"; then
-
-    if command -v rexo >/dev/null 2>&1; then
-        echo "Rexo Code is available:"
-        echo "  $(command -v rexo)"
-
-    else
-        echo "Rexo Code was installed successfully."
-    fi
-
-else
-
-    echo "Rexo Code was installed successfully."
-    echo ""
-    echo "Your current shell does not have the new PATH yet."
-
-    if [[ -n "$RC_FILE" ]]; then
-        echo "Run:"
-        echo ""
-        echo "  source \"$RC_FILE\""
-    fi
-
-fi
-
-# ============================================================
-# Done
-# ============================================================
-
+echo "Done. Open a NEW terminal window (or run 'source $RC_FILE') and run:"
 echo ""
-echo "----------------------------------------"
-echo "Rexo Code installation complete."
-echo "----------------------------------------"
+echo "    rexo"
 echo ""
-
-if [[ "$PATH_UPDATED" -eq 1 ]]; then
-    echo "Open a new terminal or reload your shell:"
-    echo ""
-
-    if [[ -n "$RC_FILE" ]]; then
-        echo "  source \"$RC_FILE\""
-    fi
-
-    echo ""
-fi
-
-echo "Then run:"
-echo ""
-echo "  rexo"
-echo ""
-echo "Enjoy Rexo Code."
+echo "To remove it later, run ./uninstall.sh from this same folder."

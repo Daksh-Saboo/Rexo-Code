@@ -1,52 +1,37 @@
 <#
 .SYNOPSIS
-    Installs Rexo Code and adds `rexo` to the user PATH.
+    Installs Rexo Code and adds `rexo` to the user's PATH.
 
 .DESCRIPTION
     Supports both:
 
-      1. Release archive
-         A folder containing:
-           install.ps1
-           rexo.exe
-           rexo.ico
+    1. Release archive
+       - Expects rexo.exe next to this script.
+       - Does not build anything.
 
-         The prebuilt executable is installed directly.
-
-      2. Source checkout
-         A folder containing:
-           install.ps1
-           Cargo.toml
-
-         The script builds Rexo Code using:
-           cargo build --release
-
-         The resulting target\release\rexo.exe is installed.
+    2. Source checkout
+       - Expects Cargo.toml next to this script.
+       - Builds with `cargo build --release`.
+       - Use -SkipBuild to reuse an existing target\release\rexo.exe.
 
     The executable is installed to:
 
         %LOCALAPPDATA%\RexoCode\bin
 
-    The installation directory is added to the current user's PATH.
+    The directory is added to the user's PATH using the Windows
+    Environment API instead of `setx`.
 
-    The script modifies the user PATH through the Windows environment
-    API instead of using `setx`, avoiding PATH truncation problems.
-
-    IMPORTANT:
-        Open a NEW Command Prompt or PowerShell window after installation
-        for the PATH change to become available.
+    A new terminal window is required after installation.
 
 .PARAMETER SkipBuild
-    Source checkout only.
-
-    Reuses target\release\rexo.exe if it already exists instead of
-    running cargo build.
+    Source checkout only. Reuses an existing release executable instead
+    of running `cargo build --release`.
 
 .EXAMPLE
-    PS> .\install.ps1
+    .\install.ps1
 
 .EXAMPLE
-    PS> .\install.ps1 -SkipBuild
+    .\install.ps1 -SkipBuild
 #>
 
 [CmdletBinding()]
@@ -61,61 +46,63 @@ $ErrorActionPreference = "Stop"
 # ------------------------------------------------------------
 
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$InstallDir = Join-Path $env:LOCALAPPDATA "RexoCode\bin"
 
-$FlatExe = Join-Path $RepoRoot "rexo.exe"
-$BuiltExe = Join-Path $RepoRoot "target\release\rexo.exe"
+$FlatExe      = Join-Path $RepoRoot "rexo.exe"
+$SourceExe    = Join-Path $RepoRoot "target\release\rexo.exe"
+$CargoToml    = Join-Path $RepoRoot "Cargo.toml"
 
-# ------------------------------------------------------------
-# Header
-# ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "========================================" -ForegroundColor DarkCyan
-Write-Host "          Rexo Code Installer" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor DarkCyan
-Write-Host ""
+$InstallDir   = Join-Path $env:LOCALAPPDATA "RexoCode\bin"
+$TargetExe    = Join-Path $InstallDir "rexo.exe"
+$TargetIcon   = Join-Path $InstallDir "rexo.ico"
 
 # ------------------------------------------------------------
-# Locate executable
+# Detect release archive or source checkout
 # ------------------------------------------------------------
 
-if (Test-Path -LiteralPath $FlatExe -PathType Leaf) {
+if (Test-Path -LiteralPath $FlatExe) {
 
     # Release archive
-    Write-Host "Release archive detected." -ForegroundColor Cyan
-    Write-Host "Using bundled rexo.exe..." -ForegroundColor Gray
-
     $ReleaseExe = $FlatExe
+
+    Write-Host "Rexo Code release archive detected." -ForegroundColor Cyan
 }
 else {
 
     # Source checkout
-    $ReleaseExe = $BuiltExe
+    $ReleaseExe = $SourceExe
 
-    Write-Host "Source checkout detected." -ForegroundColor Cyan
+    if (-not (Test-Path -LiteralPath $CargoToml)) {
+        throw @"
+Could not find Rexo Code.
 
-    if ($SkipBuild -and (Test-Path -LiteralPath $ReleaseExe -PathType Leaf)) {
+Expected either:
 
-        Write-Host "Skipping build (-SkipBuild)." -ForegroundColor Yellow
-        Write-Host "Using existing release executable." -ForegroundColor Gray
+  $FlatExe
+
+or:
+
+  $CargoToml
+
+Make sure install.ps1 is inside a Rexo Code release archive
+or the root of the Rexo Code source repository.
+"@
     }
-    else {
 
-        # Check Cargo
-        $Cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    # Build unless SkipBuild is requested and the executable already exists.
+    if (-not $SkipBuild -or -not (Test-Path -LiteralPath $ReleaseExe)) {
 
-        if (-not $Cargo) {
-            Write-Host ""
-            Write-Host "ERROR: Cargo was not found on PATH." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "Install Rust from:" -ForegroundColor Yellow
-            Write-Host "https://rustup.rs" -ForegroundColor White
-            Write-Host ""
-            Write-Host "Then open a NEW terminal and run this installer again." -ForegroundColor Yellow
-            exit 1
+        if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            throw @"
+Cargo was not found on PATH.
+
+Install Rust from:
+https://rustup.rs
+
+Then open a NEW terminal and run this installer again.
+"@
         }
 
+        Write-Host ""
         Write-Host "Building Rexo Code (release)..." -ForegroundColor Cyan
         Write-Host ""
 
@@ -131,9 +118,9 @@ else {
         finally {
             Pop-Location
         }
-
-        Write-Host ""
-        Write-Host "Build completed successfully." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Using existing release build." -ForegroundColor Yellow
     }
 }
 
@@ -141,117 +128,101 @@ else {
 # Verify executable
 # ------------------------------------------------------------
 
-if (-not (Test-Path -LiteralPath $ReleaseExe -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $ReleaseExe)) {
+    throw @"
+Rexo Code executable was not found:
 
-    Write-Host ""
-    Write-Host "ERROR: Rexo executable was not found." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Expected:" -ForegroundColor Yellow
-    Write-Host "  $ReleaseExe" -ForegroundColor White
-    Write-Host ""
+  $ReleaseExe
 
-    if (-not (Test-Path -LiteralPath $FlatExe)) {
-        Write-Host "If this is a release archive, make sure rexo.exe is" -ForegroundColor Gray
-        Write-Host "located next to install.ps1." -ForegroundColor Gray
-    }
-
-    exit 1
+Check the build output or make sure the release archive contains
+rexo.exe next to install.ps1.
+"@
 }
 
 # ------------------------------------------------------------
 # Create installation directory
 # ------------------------------------------------------------
 
-Write-Host ""
-Write-Host "Installing Rexo Code..." -ForegroundColor Cyan
-
 New-Item `
     -ItemType Directory `
     -Force `
-    -Path $InstallDir |
-    Out-Null
+    -Path $InstallDir `
+    | Out-Null
 
 # ------------------------------------------------------------
 # Install executable
 # ------------------------------------------------------------
-
-$TargetExe = Join-Path $InstallDir "rexo.exe"
 
 Copy-Item `
     -LiteralPath $ReleaseExe `
     -Destination $TargetExe `
     -Force
 
+if (-not (Test-Path -LiteralPath $TargetExe)) {
+    throw "Rexo Code installation failed. rexo.exe was not copied to $InstallDir."
+}
+
 # ------------------------------------------------------------
 # Install icon
 # ------------------------------------------------------------
 
-$FlatIcon = Join-Path $RepoRoot "rexo.ico"
+$FlatIcon  = Join-Path $RepoRoot "rexo.ico"
 $SourceIcon = Join-Path $RepoRoot "assets\rexo.ico"
-$TargetIcon = Join-Path $InstallDir "rexo.ico"
 
-if (Test-Path -LiteralPath $FlatIcon -PathType Leaf) {
+$IconSource = $null
 
-    Copy-Item `
-        -LiteralPath $FlatIcon `
-        -Destination $TargetIcon `
-        -Force
-
-    Write-Host "Installed icon: $TargetIcon" -ForegroundColor Gray
+if (Test-Path -LiteralPath $FlatIcon) {
+    $IconSource = $FlatIcon
 }
-elseif (Test-Path -LiteralPath $SourceIcon -PathType Leaf) {
+elseif (Test-Path -LiteralPath $SourceIcon) {
+    $IconSource = $SourceIcon
+}
 
+if ($IconSource) {
     Copy-Item `
-        -LiteralPath $SourceIcon `
+        -LiteralPath $IconSource `
         -Destination $TargetIcon `
         -Force
 
-    Write-Host "Installed icon: $TargetIcon" -ForegroundColor Gray
+    Write-Host "Installed icon: $TargetIcon" -ForegroundColor DarkGray
 }
 
 Write-Host ""
-Write-Host "Installed: $TargetExe" -ForegroundColor Green
+Write-Host "Installed Rexo Code:" -ForegroundColor Green
+Write-Host "  $TargetExe" -ForegroundColor White
 
 # ------------------------------------------------------------
 # Add installation directory to USER PATH
 # ------------------------------------------------------------
-
-Write-Host ""
-Write-Host "Checking user PATH..." -ForegroundColor Cyan
 
 $CurrentPath = [Environment]::GetEnvironmentVariable(
     "Path",
     "User"
 )
 
-if ([string]::IsNullOrWhiteSpace($CurrentPath)) {
-    $PathEntries = @()
-}
-else {
-    $PathEntries = @(
-        $CurrentPath -split ";" |
-        Where-Object {
+$PathEntries = @()
+
+if (-not [string]::IsNullOrWhiteSpace($CurrentPath)) {
+
+    $PathEntries = $CurrentPath `
+        -split ";" `
+        | ForEach-Object {
+            $_.Trim().Trim('"')
+        } `
+        | Where-Object {
             -not [string]::IsNullOrWhiteSpace($_)
         }
-    )
 }
 
-$InstallDirNormalized = $InstallDir.TrimEnd("\").ToLowerInvariant()
+$NormalizedInstallDir = $InstallDir.TrimEnd('\')
 
-$AlreadyOnPath = $false
-
-foreach ($Entry in $PathEntries) {
-
-    $EntryNormalized = $Entry.Trim().TrimEnd("\").ToLowerInvariant()
-
-    if ($EntryNormalized -eq $InstallDirNormalized) {
-        $AlreadyOnPath = $true
-        break
-    }
+$AlreadyOnPath = $PathEntries | Where-Object {
+    $_.TrimEnd('\') -ieq $NormalizedInstallDir
 }
 
 if ($AlreadyOnPath) {
 
+    Write-Host ""
     Write-Host "Rexo Code is already on your user PATH." -ForegroundColor Yellow
 }
 else {
@@ -269,27 +240,22 @@ else {
         "User"
     )
 
-    Write-Host "Added Rexo Code to your user PATH." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Added Rexo Code to your user PATH:" -ForegroundColor Green
+    Write-Host "  $InstallDir" -ForegroundColor White
 }
 
 # ------------------------------------------------------------
-# Verify installation
+# Finished
 # ------------------------------------------------------------
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor DarkCyan
-Write-Host "       Rexo Code Installation Done" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor DarkCyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host " Rexo Code installation complete!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "Installed to:" -ForegroundColor Gray
-Write-Host "  $InstallDir" -ForegroundColor White
-Write-Host ""
-
-Write-Host "IMPORTANT:" -ForegroundColor Yellow
-Write-Host "Open a NEW PowerShell or Command Prompt window." -ForegroundColor Yellow
-Write-Host "The current terminal will not automatically receive" -ForegroundColor Gray
-Write-Host "the updated PATH." -ForegroundColor Gray
+Write-Host "Open a NEW PowerShell or cmd.exe window." -ForegroundColor Yellow
 Write-Host ""
 
 Write-Host "Then run:" -ForegroundColor Cyan
@@ -297,10 +263,15 @@ Write-Host ""
 Write-Host "    rexo" -ForegroundColor White
 Write-Host ""
 
-Write-Host "To remove Rexo Code later, run:" -ForegroundColor Gray
-Write-Host ""
-Write-Host "    .\uninstall.ps1" -ForegroundColor White
-Write-Host ""
+Write-Host "Installed version:" -ForegroundColor Cyan
 
-Write-Host "Installation complete." -ForegroundColor Green
+try {
+    & $TargetExe --version
+}
+catch {
+    Write-Host "Unable to read the installed version." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "To remove Rexo Code later, run uninstall.ps1." -ForegroundColor DarkGray
 Write-Host ""
