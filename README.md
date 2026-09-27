@@ -397,22 +397,41 @@ The complete documentation is available in the **[Rexo Code Wiki](https://github
 
 ---
 
-# 📦 Releases
+## 📦 Releases
 
-Prebuilt releases currently target:
+### 🟢 Stable — GitHub Releases
 
-```text
-Windows x86_64
-Windows ARM64
-Linux x86_64
-macOS ARM64
-```
+**Recommended for everyone.**
 
-Every release includes the appropriate installation scripts and release artifacts.
+The latest stable version of Rexo Code is published through GitHub Releases.
 
-**[→ View Rexo Code Releases](https://github.com/Daksh-Saboo/Rexo-Code/releases)**
+**[→ Download Rexo Code v0.9.0](https://github.com/Daksh-Saboo/Rexo-Code/releases/tag/v0.9.0)**
+
+Stable releases are tested builds intended for normal day-to-day use.
 
 ---
+
+### 🧪 Experimental Builds — MediaFire
+
+Want to test newer work before it becomes a stable release?
+
+Experimental builds are published separately on MediaFire.
+
+**[→ View Experimental Builds](https://www.mediafire.com/folder/gek1exvd720wk/Tron_X_Rexo_Code_Experimentals)**
+
+> ⚠️ Experimental builds may contain unfinished features, bugs, breaking changes, or work that has not yet been included in a stable release.
+
+### Which one should I use?
+
+|                 | Stable          | Experimental   |
+| --------------- | --------------- | -------------- |
+| **Source**      | GitHub Releases | MediaFire      |
+| **Recommended** | ✅ Yes           | ⚠️ For testing |
+| **Stability**   | Tested          | May change     |
+| **Purpose**     | Normal use      | Early testing  |
+
+**If you're new to Rexo, use the GitHub release.**
+
 
 # 🧪 Project Status
 
