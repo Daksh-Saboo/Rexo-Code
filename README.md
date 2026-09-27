@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ Rexo Code
+#  Rexo Code
 
 ### An open-source, provider-agnostic AI coding agent for your terminal.
 
@@ -48,7 +48,7 @@ directly from your terminal.
   <img src="https://github.com/Daksh-Saboo/Tron-Assets/blob/main/Screenshot%202026-09-26%20084946.jpg?raw=true" width="70%">
 </p>
 
-# 🚀 Why Rexo?
+#  Why Rexo?
 
 Rexo is built around a simple idea:
 
@@ -64,7 +64,7 @@ You choose the model.
 
 ---
 
-# ⚡ Install
+#  Install
 
 Download the latest release from the **[Releases](https://github.com/Daksh-Saboo/Rexo-Code/releases)** page.
 
