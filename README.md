@@ -339,64 +339,6 @@ Learn more in **[How Rexo Works](https://github.com/Daksh-Saboo/Rexo-Code/wiki/H
 
 The complete documentation is available in the **[Rexo Code Wiki](https://github.com/Daksh-Saboo/Rexo-Code/wiki)**.
 
-### 🚀 Getting Started
-
-* [Installation](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Installation)
-* [Windows](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Windows)
-* [Linux](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Linux)
-* [macOS](https://github.com/Daksh-Saboo/Rexo-Code/wiki/macOS)
-* [First Run](https://github.com/Daksh-Saboo/Rexo-Code/wiki/First-Run)
-* [Quick Start](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Quick-Start)
-
-### ⚙️ Configuration
-
-* [Configuration](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Configuration)
-* [Global Configuration](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Global-Configuration)
-* [Workspace Configuration](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Workspace-Configuration)
-* [Providers](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Providers)
-* [Models](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Models)
-* [Credentials](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Credentials)
-* [Environment Variables](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Environment-Variables)
-
-### 🛠️ Features
-
-* [CLI Reference](https://github.com/Daksh-Saboo/Rexo-Code/wiki/CLI-Reference)
-* [Tools](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Tools)
-* [Permissions](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Permissions)
-* [Sessions](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Sessions)
-* [Skills](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Skills)
-* [Custom Commands](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Custom-Commands)
-* [MCP](https://github.com/Daksh-Saboo/Rexo-Code/wiki/MCP)
-* [Hooks](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Hooks)
-* [Plugins](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Plugins)
-* [Subagents](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Subagents)
-* [Tasks](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Tasks)
-* [Streaming](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Streaming)
-* [Headless Mode](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Headless-Mode)
-
-### 🧠 Architecture
-
-* [How Rexo Works](https://github.com/Daksh-Saboo/Rexo-Code/wiki/How-Rexo-Works)
-* [Agent Loop](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Agent-Loop)
-* [Project Context](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Project-Context)
-* [Tool Calling](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Tool-Calling)
-* [Security Model](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Security-Model)
-
-### 👨‍💻 Development
-
-* [Architecture](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Architecture)
-* [Building From Source](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Building-From-Source)
-* [Testing](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Testing)
-* [Contributing](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Contributing)
-
-### 🧰 Help
-
-* [FAQ](https://github.com/Daksh-Saboo/Rexo-Code/wiki/FAQ)
-* [Troubleshooting](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Troubleshooting)
-* [Security](https://github.com/Daksh-Saboo/Rexo-Code/wiki/Security)
-
----
-
 ## 📦 Releases
 
 ### 🟢 Stable — GitHub Releases
